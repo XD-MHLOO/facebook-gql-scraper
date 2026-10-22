@@ -16,7 +16,7 @@ A Facebook Marketplace listing.
 
 MarketplaceListing can be created with:
 
-<code className="signature">MarketplaceListing.from_id(context: <Link to="/facebook-context">FacebookContext</Link>, id: str) -> <Link to="/models/marketplace-listing">MarketplaceListing</Link></code>
+<code className="signature">MarketplaceListing.from_listing_id(context: <Link to="/facebook-context">FacebookContext</Link>, listing_id: str) -> <Link to="/models/marketplace-listing">MarketplaceListing</Link></code>
 
 ## Listing types
 
@@ -145,7 +145,7 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-listing = fgs.MarketplaceListing.from_id(context, id="123456789876789")
+listing = fgs.MarketplaceListing.from_listing_id(context, listing_id="123456789876789")
 
 print(listing.description)
 

@@ -19,7 +19,7 @@ Post can be created with:
 <Tabs>
 <TabItem value="id" label="From ID" default>
 
-<code className="signature">Post.from_id(context: <Link to="/facebook-context">FacebookContext</Link>, id: str) -> <Link to="/models/post">Post</Link></code>
+<code className="signature">Post.from_post_id(context: <Link to="/facebook-context">FacebookContext</Link>, post_id: str) -> <Link to="/models/post">Post</Link></code>
 
 </TabItem>
 <TabItem value="pfbid" label="From PFBID">
@@ -27,7 +27,7 @@ Post can be created with:
 <code className="signature">Post.from_pfbid(context: <Link to="/facebook-context">FacebookContext</Link>, pfbid: str) -> <Link to="/models/post">Post</Link></code>
 
 :::note
-The PFBID is resolved to an ID using regex matching. Prefer `from_id` when possible.
+The PFBID is resolved to an ID using regex matching. Prefer `from_post_id` when possible.
 :::
 
 </TabItem>
@@ -103,7 +103,7 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-post = fgs.Post.from_id(context, id="253053527513133")
+post = fgs.Post.from_user_id(context, user_id="253053527513133")
 # Or from PFBID: post = fgs.Post.from_pfbid(ctx, pfbid="pfbid0qHZRZohg13A1DmZpkFvHr3yuv7y1heFNnNoijtvi5onn1ctx2sjM5rRgTMSh6EGql")
 
 for comment in post.get_comments():

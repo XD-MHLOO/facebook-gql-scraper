@@ -4,7 +4,7 @@ try:
     __version__ = version("facebook-gql-scraper")
 except PackageNotFoundError:
     __version__ = "unknown"
-    
+
 from .exceptions import *
 
 from .structures import (
@@ -28,18 +28,15 @@ from .structures import (
 from .facebookGraphql import (
     FacebookContext as FacebookContext,
 )
-from .facebookConsolidater import (
-    consolidate_jsonl as consolidate_jsonl
-)
 
-from .unifiedFacebookParser import (
-    parse_facebook_payload as parse_facebook_payload
-)
+from .facebookConsolidater import consolidate_jsonl as consolidate_jsonl
+
+from .unifiedFacebookParser import parse_facebook_payload as parse_facebook_payload
 
 from .facebookNoiseRemoval import (
-    remove_raw_facebook_json_noise as remove_raw_facebook_json_noise
+    remove_raw_facebook_json_noise as remove_raw_facebook_json_noise,
 )
 
 from .facebookOperationDiscovery import (
-    FacebookOperationDiscovery as FacebookOperationDiscovery
+    FacebookOperationDiscovery as FacebookOperationDiscovery,
 )

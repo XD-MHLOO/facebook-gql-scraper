@@ -4,7 +4,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 
 from .facebookGraphql import (
-    FacebookContext, 
+    FacebookContext,
     ProfileCometAboutAppSectionQueryGraphQL,
     ProfileCometHeaderQueryGraphQL,
     ProfileCometAppCollectionListRendererPaginationQueryGraphQL,
@@ -25,7 +25,7 @@ from .facebookGraphql import (
     MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL,
 )
 from .exceptions import (
-    FollowersNotAvailableException, 
+    FollowersNotAvailableException,
     FolloweesNotAvailableException,
     FriendFollowersNotAvailableException,
     FriendFolloweesNotAvailableException,
@@ -35,8 +35,8 @@ from .exceptions import (
     ProfileNotFoundError,
     PostNotFoundError,
     GroupNotFoundError,
-    MarketplaceListingNotFoundError
-    )
+    MarketplaceListingNotFoundError,
+)
 
 
 class Photo(NamedTuple):
@@ -77,7 +77,7 @@ class Video(NamedTuple):
     :ivar fallback_image_url: Fallback image URL for the video.
     :vartype fallback_image_url: str or None
     """
-        
+
     id: Optional[str] = None
     length_in_second: Optional[int] = None
     created_time: Optional[int] = None
@@ -101,7 +101,7 @@ class GenericMedia(NamedTuple):
     :ivar animated_image_attribution: Attribution information for animated media.
     :vartype animated_image_attribution: str or None
     """
-     
+
     id: Optional[str] = None
     image_url: Optional[str] = None
     genericMedia_url: Optional[str] = None
@@ -119,10 +119,11 @@ class Sticker(NamedTuple):
     :ivar image_url: URL of the sticker image.
     :vartype image_url: str or None
     """
-        
+
     id: Optional[str] = None
     label: Optional[str] = None
     image_url: Optional[str] = None
+
 
 class GroupMember(NamedTuple):
     """
@@ -138,7 +139,8 @@ class GroupMember(NamedTuple):
 
     join_status: Optional[str] = None
     contribution_score: Optional[str] = None
-    profile: Optional['Profile'] = None
+    profile: Optional["Profile"] = None
+
 
 class Reactor(NamedTuple):
     """
@@ -149,8 +151,10 @@ class Reactor(NamedTuple):
     :ivar profile: Profile of the user who reacted.
     :vartype profile: Profile or None
     """
+
     reaction_type_id: Optional[str] = None
-    profile: Optional['Profile'] = None
+    profile: Optional["Profile"] = None
+
 
 class Seller(NamedTuple):
     """
@@ -176,6 +180,7 @@ class Seller(NamedTuple):
     :ivar combined_ratings_are_private: Whether combined ratings are hidden.
     :vartype combined_ratings_are_private: bool or None
     """
+
     profile: Optional["Profile"] = None
     is_verified: Optional[bool] = None
 
@@ -186,6 +191,7 @@ class Seller(NamedTuple):
     combined_ratings_are_private: Optional[bool] = None
     combined_ratings_average: Optional[float] = None
     combined_ratings_count: Optional[int] = None
+
 
 class PartnerSeller(NamedTuple):
     """
@@ -217,6 +223,7 @@ class PartnerSeller(NamedTuple):
     number_of_sold_listings: Optional[int] = None
     average_ship_time: Optional[str] = None
 
+
 def safe_get(data, *keys, default=None):
     """Walk nested dicts/lists. Return default if anything is missing."""
     for key in keys:
@@ -233,7 +240,6 @@ def safe_get(data, *keys, default=None):
         return default
 
     return data
-
 
 
 def _attachment_to_dict(attachment: dict) -> Optional[dict]:
@@ -275,6 +281,7 @@ def _attachment_to_dict(attachment: dict) -> Optional[dict]:
             "image_url": attachment.get("image_url"),
         }
 
+
 def _dict_to_attachment(att: dict) -> Optional[Photo | Video | GenericMedia | Sticker]:
     """Convert a raw attachment dict into a typed NamedTuple, or None for unknown types."""
     t = att.get("type")
@@ -308,7 +315,8 @@ def _dict_to_attachment(att: dict) -> Optional[Photo | Video | GenericMedia | St
             label=att.get("label"),
             image_url=att.get("image_url"),
         )
-    return None   
+    return None
+
 
 class FrozenPaginatedIterator(NamedTuple):
     """
@@ -335,7 +343,10 @@ class FrozenPaginatedIterator(NamedTuple):
     cursor: Optional[str]
     has_next_page: bool
 
+
 T = TypeVar("T")
+
+
 class PaginatedIterator(Iterator[T]):
     """
     Lazy iterator for paginated Facebook API responses.
@@ -360,13 +371,19 @@ class PaginatedIterator(Iterator[T]):
     :type query_variables: dict or None
     """
 
-
-    def __init__(self, request_fn, parser, page_wrapper, item_wrapper,
-                 iterator_type=None, query_variables=None):
+    def __init__(
+        self,
+        request_fn,
+        parser,
+        page_wrapper,
+        item_wrapper,
+        iterator_type=None,
+        query_variables=None,
+    ):
         self._request_fn = request_fn
         self._parser = parser
-        self._page_wrapper = page_wrapper      # convert parsed response into -> (list_of_raw_dicts, page_info)
-        self._item_wrapper = item_wrapper      # convert raw_dict -> model
+        self._page_wrapper = page_wrapper  # convert parsed response into -> (list_of_raw_dicts, page_info)
+        self._item_wrapper = item_wrapper  # convert raw_dict -> model
         self._iterator_type = iterator_type
         self._query_variables = query_variables or {}
 
@@ -425,7 +442,7 @@ class PaginatedIterator(Iterator[T]):
         )
         iterator._exhausted = True
         return iterator
-    
+
     def freeze(self) -> FrozenPaginatedIterator:
         return FrozenPaginatedIterator(
             iterator_type=self._iterator_type,
@@ -438,8 +455,10 @@ class PaginatedIterator(Iterator[T]):
     def thaw(self, frozen: FrozenPaginatedIterator) -> None:
         if self._raw_buffer or self._cursor is not None:
             raise ValueError("thaw() called on already-used iterator.")
-        if (self._iterator_type != frozen.iterator_type or
-                self._query_variables != frozen.query_variables):
+        if (
+            self._iterator_type != frozen.iterator_type
+            or self._query_variables != frozen.query_variables
+        ):
             raise ValueError("Mismatching resume information.")
         self._raw_buffer = list(frozen.remaining_raw or [])
         self._cursor = frozen.cursor
@@ -467,8 +486,8 @@ class FacebookModel:
         return hash(self._identity)
 
     def _asdict(self):
-        return dict(self._data) 
-    
+        return dict(self._data)
+
     def _obtain_metadata(self):
         """
         Fetch and merge additional metadata into the model.
@@ -476,8 +495,6 @@ class FacebookModel:
         Subclasses override this method with their corresponding Facebook
         GraphQL requests.
         """
-        pass
-
 
     def ensure_full_metadata(self):
         """
@@ -540,7 +557,14 @@ class Post(FacebookModel):
     :param owner: The :class:`Profile` that owns the post, if already known.
     :param group: The :class:`Group` containing the post, if applicable.
     """
-    def __init__(self, context: FacebookContext, data: dict, owner: "Profile" = None, group: "Group" = None):
+
+    def __init__(
+        self,
+        context: FacebookContext,
+        data: dict,
+        owner: "Profile" = None,
+        group: "Group" = None,
+    ):
         super().__init__(context, data)
         assert "id" in self._data, "Post requires id"
         self._full_fetched = False
@@ -565,14 +589,12 @@ class Post(FacebookModel):
         if self._full_fetched:
             return
 
-        postGraphQL = CometSinglePostDialogContentQueryGraphQL(self._context)
-        response_postGraphQL = postGraphQL.send(postId=self.id)
-        parsed = self._context.parse_graphql_response(response_postGraphQL.text)
+        post_graphql = CometSinglePostDialogContentQueryGraphQL(self._context)
+        response_post_graphql = post_graphql.send(postId=self.id)
+        parsed = self._context.parse_graphql_response(response_post_graphql.text)
 
         if parsed["parsed_data"] is None:
-            raise PostNotFoundError(
-                f"Post not found: {self.id}"
-            )
+            raise PostNotFoundError(f"Post not found: {self.id}")
 
         post_data = {
             "id": parsed["parsed_data"]["post"]["id"],
@@ -583,9 +605,9 @@ class Post(FacebookModel):
                 "name": parsed["parsed_data"]["post"]["author"]["name"],
                 "url": parsed["parsed_data"]["post"]["author"]["url"],
                 "profile_picture_url": parsed["parsed_data"]["post"]["author"]["profile_picture_url"],
-            },      
-            "title": parsed["parsed_data"]["post"]["title"],  
-            "text": parsed["parsed_data"]["post"]["text"],  
+            },
+            "title": parsed["parsed_data"]["post"]["title"],
+            "text": parsed["parsed_data"]["post"]["text"],
             "attachments": [
                 _attachment_to_dict(a)
                 for a in parsed["parsed_data"]["post"]["attachments"]
@@ -595,15 +617,15 @@ class Post(FacebookModel):
                 "total": parsed["parsed_data"]["post"]["reactions"]["total"],
                 "breakdown": [
                     {
-                        "id": entry["id"], 
-                        "name": entry["name"],  
+                        "id": entry["id"],
+                        "name": entry["name"],
                         "count": entry["count"],
-                    } for entry in parsed["parsed_data"]["post"]["reactions"]["breakdown"]
+                    }
+                    for entry in parsed["parsed_data"]["post"]["reactions"]["breakdown"]
                 ],
             },
             "share_count": parsed["parsed_data"]["post"]["share_count"],
             "comments_count": parsed["parsed_data"]["post"]["comments_count"],
-            
         }
         self._data.update(post_data)
         self._full_fetched = True
@@ -617,7 +639,7 @@ class Post(FacebookModel):
         :rtype: str
         """
         return self._field("id")
-    
+
     @property
     def creation_time(self) -> Optional[int]:
         """
@@ -647,7 +669,7 @@ class Post(FacebookModel):
         :rtype: str or None
         """
         return self._field("title")
-    
+
     @property
     def text(self) -> Optional[str]:
         """
@@ -658,7 +680,7 @@ class Post(FacebookModel):
         """
         return self._field("text")
 
-     # ---------- reactions ----------
+    # ---------- reactions ----------
 
     @property
     def reaction_count(self) -> Optional[str]:
@@ -690,7 +712,6 @@ class Post(FacebookModel):
         """
         return self._field(("reactions", "breakdown"))
 
-
     # ---------- counts ----------
 
     @property
@@ -712,7 +733,7 @@ class Post(FacebookModel):
         :rtype: int
         """
         return self._field("comments_count")
-    
+
     def get_comments(self) -> PaginatedIterator["Comment"]:
         """
         Iterate over all comments of the post.
@@ -722,10 +743,10 @@ class Post(FacebookModel):
         :return: Iterator yielding :class:`Comment` objects.
         :rtype: PaginatedIterator
         """
-        commentsGraphQL = CommentsListComponentsPaginationQueryGraphQL(self._context)
+        comments_graphql = CommentsListComponentsPaginationQueryGraphQL(self._context)
 
         def request_fn(cursor):
-            return commentsGraphQL.send(
+            return comments_graphql.send(
                 postId=self._field("id"),
                 commentsAfterCursor=cursor,
             ).text
@@ -735,7 +756,9 @@ class Post(FacebookModel):
                 {
                     "id": item["id"],
                     "text": item["text"],
-                    "attachments": [_attachment_to_dict(att) for att in item["attachments"]],
+                    "attachments": [
+                        _attachment_to_dict(att) for att in item["attachments"]
+                    ],
                     "created_time": item["created_time"],
                     "reaction_count": item["reaction_count"],
                     "reply_count": item["reply_count"],
@@ -752,7 +775,7 @@ class Post(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -768,7 +791,6 @@ class Post(FacebookModel):
             query_variables={"postId": self.id},
         )
 
-
     def get_reactors(self) -> PaginatedIterator[Reactor]:
         """
         Iterate over users who reacted to the post.
@@ -776,13 +798,15 @@ class Post(FacebookModel):
         :return: Iterator yielding :class:`Reactor` objects.
         :rtype: PaginatedIterator
         """
-        reactorsGraphQL = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(self._context)
+        reactors_graphql = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(
+            self._context
+        )
 
         def request_fn(cursor):
-            return reactorsGraphQL.send(
+            return reactors_graphql.send(
                 postId=self._field("id"),
                 reactionID=None,
-                type="post",
+                itemType="post",
                 cursor=cursor,
             ).text
 
@@ -801,7 +825,7 @@ class Post(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -833,7 +857,7 @@ class Post(FacebookModel):
         """
         if self._field("attachments") is None:
             return None
-        
+
         result = []
         for att in self._field("attachments", default=[]):
             converted = _dict_to_attachment(att)
@@ -854,17 +878,21 @@ class Post(FacebookModel):
         """
         if self._owner:
             return self._owner
-        elif self._field("author", None) is not None:
+
+        if self._field("author", None) is not None:
             data = self._field("author")
 
-            return Profile(self._context, {
-                "id": data.get("id"),
-                "name": data.get("name"),
-                "url": data.get("url"),
-                "profile_picture_url": data.get("profile_picture_url"),
-            })
-        else:
-            return None
+            return Profile(
+                self._context,
+                {
+                    "id": data.get("id"),
+                    "name": data.get("name"),
+                    "url": data.get("url"),
+                    "profile_picture_url": data.get("profile_picture_url"),
+                },
+            )
+
+        return None
 
     @property
     def group(self) -> Optional["Group"]:
@@ -876,13 +904,12 @@ class Post(FacebookModel):
         :rtype: Group or None
         """
         return self._group
-      
-        
+
     @classmethod
-    def from_id(
+    def from_post_id(
         cls,
         context: FacebookContext,
-        id: str,
+        post_id: str,
     ) -> "Post":
         """
         Create a post from its Facebook ID.
@@ -890,14 +917,12 @@ class Post(FacebookModel):
 
         :param context: Facebook context used to fetch the post.
         :type context: FacebookContext
-        :param id: Facebook post identifier.
-        :type id: str
+        :param post_id: Facebook post identifier.
+        :type post_id: str
         :return: Post with its metadata fetched.
         :rtype: Post
         """
-        post = cls(context, {
-            "id": id
-        })
+        post = cls(context, {"id": post_id})
         post._obtain_metadata()
         return post
 
@@ -928,13 +953,15 @@ class Post(FacebookModel):
 
         # Normalize the final URL.
         p = urlsplit(final_url)
-        clean = urlunsplit((
-            "https",
-            p.netloc,
-            p.path.rstrip("/"),
-            "",
-            "",
-        ))
+        clean = urlunsplit(
+            (
+                "https",
+                p.netloc,
+                p.path.rstrip("/"),
+                "",
+                "",
+            )
+        )
 
         normalized_post_url = re.escape(clean).replace("/", r"\\/")
 
@@ -944,12 +971,11 @@ class Post(FacebookModel):
         post_id = match.group(1) if match else None
 
         if post_id:
-            return cls.from_id(context, post_id)
+            return cls.from_post_id(context, post_id)
 
         raise PostNotFoundError(
             f"No post found for PFBID: {pfbid} (final URL: {final_url})"
         )
-
 
 
 class Profile(FacebookModel):
@@ -965,6 +991,7 @@ class Profile(FacebookModel):
     :param data: Initial profile data.
     :type data: dict
     """
+
     def __init__(self, context, data):
         super().__init__(context, data)
         assert "id" in self._data, "User requires id"
@@ -981,27 +1008,38 @@ class Profile(FacebookModel):
         if self._full_fetched:
             return
 
-        userCollectionIdsGraphQL = ProfileCometHeaderQueryGraphQL(self._context)
-        response_userCollectionIds = userCollectionIdsGraphQL.send(userId=self.id)
-        parsed_userCollectionIds = self._context.parse_graphql_response(response_userCollectionIds.text)
+        user_collection_ids_graphql = ProfileCometHeaderQueryGraphQL(self._context)
+        response_user_collection_ids = user_collection_ids_graphql.send(userId=self.id)
+        parsed_user_collection_ids = self._context.parse_graphql_response(
+            response_user_collection_ids.text
+        )
 
-        if parsed_userCollectionIds["parsed_data"] is None:
-            raise ProfileNotFoundError(
-                f"Profile not found: {self.id}"
-            )
+        if parsed_user_collection_ids["parsed_data"] is None:
+            raise ProfileNotFoundError(f"Profile not found: {self.id}")
 
-        userAboutCollectionGraphQL = ProfileCometAboutAppSectionQueryGraphQL(self._context)
+        user_about_collection_graphql = ProfileCometAboutAppSectionQueryGraphQL(
+            self._context
+        )
 
-        about_sectionToken = parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["id"]
+        about_section_token = parsed_user_collection_ids["parsed_data"]["tabs"]["About"][
+            "id"
+        ]
 
         def _fetch_about(collection_name):
             """Return parsed About payload for a collection, or {} if token is missing."""
-            token = safe_get(parsed_userCollectionIds, "parsed_data", "tabs", "About", "collections", collection_name)
-            if token is None or about_sectionToken is None:
+            token = safe_get(
+                parsed_user_collection_ids,
+                "parsed_data",
+                "tabs",
+                "About",
+                "collections",
+                collection_name,
+            )
+            if token is None or about_section_token is None:
                 return {}
-            response = userAboutCollectionGraphQL.send(
+            response = user_about_collection_graphql.send(
                 userId=self.id,
-                sectionToken=about_sectionToken,
+                sectionToken=about_section_token,
                 collectionToken=token,
             )
             return self._context.parse_graphql_response(response.text) or {}
@@ -1009,13 +1047,43 @@ class Profile(FacebookModel):
         # directory_basic_info
         parsed_directory_basic_info = _fetch_about("directory_basic_info")
 
-        biography = safe_get(parsed_directory_basic_info, "parsed_data", "About", "directory_bio", "items", 0, "title")
+        biography = safe_get(
+            parsed_directory_basic_info,
+            "parsed_data",
+            "About",
+            "directory_bio",
+            "items",
+            0,
+            "title",
+        )
 
-        business_rating = safe_get(parsed_directory_basic_info, "parsed_data", "About", "directory_rating_and_reviews", "items", 0, "title")
-        business_address = safe_get(parsed_directory_basic_info, "parsed_data", "About", "directory_business_address", "items", 0, "title")
-        business_hours = safe_get(parsed_directory_basic_info, "parsed_data", "About", "directory_business_hours", "items", 0, "title")
-
-        
+        business_rating = safe_get(
+            parsed_directory_basic_info,
+            "parsed_data",
+            "About",
+            "directory_rating_and_reviews",
+            "items",
+            0,
+            "title",
+        )
+        business_address = safe_get(
+            parsed_directory_basic_info,
+            "parsed_data",
+            "About",
+            "directory_business_address",
+            "items",
+            0,
+            "title",
+        )
+        business_hours = safe_get(
+            parsed_directory_basic_info,
+            "parsed_data",
+            "About",
+            "directory_business_hours",
+            "items",
+            0,
+            "title",
+        )
 
         # directory_specialties
         # parsed_directory_specialties = _fetch_about("directory_specialties")
@@ -1023,31 +1091,116 @@ class Profile(FacebookModel):
         # directory_intro
         parsed_directory_intro = _fetch_about("directory_intro")
         if biography is None:
-            biography = safe_get(parsed_directory_intro, "parsed_data", "About", "directory_bio", "items", 0, "text")
+            biography = safe_get(
+                parsed_directory_intro,
+                "parsed_data",
+                "About",
+                "directory_bio",
+                "items",
+                0,
+                "text",
+            )
 
         # directory_category
         parsed_directory_category = _fetch_about("directory_category")
 
-        category = safe_get(parsed_directory_category, "parsed_data", "About", "directory_category", "items", 0, "title")
+        category = safe_get(
+            parsed_directory_category,
+            "parsed_data",
+            "About",
+            "directory_category",
+            "items",
+            0,
+            "title",
+        )
 
         # directory_personal_details
         parsed_directory_personal_details = _fetch_about("directory_personal_details")
 
-        current_location = safe_get(parsed_directory_personal_details, "parsed_data", "About", "directory_location", "items", 0, "title")
-        hometown         = safe_get(parsed_directory_personal_details, "parsed_data", "About", "directory_hometown", "items", 0, "title")
+        current_location = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "directory_location",
+            "items",
+            0,
+            "title",
+        )
+        hometown = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "directory_hometown",
+            "items",
+            0,
+            "title",
+        )
 
-        birthday_day  = safe_get(parsed_directory_personal_details, "parsed_data", "About", "directory_birthday", "items", 0, "title")
-        birthday_year = safe_get(parsed_directory_personal_details, "parsed_data", "About", "directory_birthday", "items", 1, "title")
-        birthday = f"{birthday_day} {birthday_year}" if (birthday_day or birthday_year) else None
+        birthday_day = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "directory_birthday",
+            "items",
+            0,
+            "title",
+        )
+        birthday_year = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "directory_birthday",
+            "items",
+            1,
+            "title",
+        )
+        birthday = (
+            f"{birthday_day} {birthday_year}"
+            if (birthday_day or birthday_year)
+            else None
+        )
 
-
-        relationship_type = safe_get(parsed_directory_personal_details, "parsed_data", "About", "relationship", "items", 0, "text")
+        relationship_type = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "relationship",
+            "items",
+            0,
+            "text",
+        )
         if relationship_type is None:
-            relationship_type = safe_get(parsed_directory_personal_details, "parsed_data", "About", "relationship", "items", 0, "title")
+            relationship_type = safe_get(
+                parsed_directory_personal_details,
+                "parsed_data",
+                "About",
+                "relationship",
+                "items",
+                0,
+                "title",
+            )
         relationship = {
-            "type":  relationship_type,
-            "date": safe_get(parsed_directory_personal_details, "parsed_data", "About", "relationship", "items", 0, "item", 0),
-            "desc":  safe_get(parsed_directory_personal_details, "parsed_data", "About", "relationship", "items", 0, "item", 1),
+            "type": relationship_type,
+            "date": safe_get(
+                parsed_directory_personal_details,
+                "parsed_data",
+                "About",
+                "relationship",
+                "items",
+                0,
+                "item",
+                0,
+            ),
+            "desc": safe_get(
+                parsed_directory_personal_details,
+                "parsed_data",
+                "About",
+                "relationship",
+                "items",
+                0,
+                "item",
+                1,
+            ),
         }
 
         family = [
@@ -1055,10 +1208,25 @@ class Profile(FacebookModel):
                 "name": i.get("title"),
                 "type": safe_get(i, "item", 0),
             }
-            for i in safe_get(parsed_directory_personal_details, "parsed_data", "About", "family", "items", default=[])
+            for i in safe_get(
+                parsed_directory_personal_details,
+                "parsed_data",
+                "About",
+                "family",
+                "items",
+                default=[],
+            )
         ]
 
-        language_title = safe_get(parsed_directory_personal_details, "parsed_data", "About", "directory_languages", "items", 0, "title")
+        language_title = safe_get(
+            parsed_directory_personal_details,
+            "parsed_data",
+            "About",
+            "directory_languages",
+            "items",
+            0,
+            "title",
+        )
         if language_title:
             language = [
                 piece.strip()
@@ -1077,7 +1245,14 @@ class Profile(FacebookModel):
                 "link": safe_get(i, "item", 0),
                 "desc": i.get("title"),
             }
-            for i in safe_get(parsed_directory_links, "parsed_data", "About", "directory_links", "items", default=[])
+            for i in safe_get(
+                parsed_directory_links,
+                "parsed_data",
+                "About",
+                "directory_links",
+                "items",
+                default=[],
+            )
         ]
         # directory_communities
         # parsed_directory_communities = _fetch_about("directory_communities")
@@ -1090,29 +1265,42 @@ class Profile(FacebookModel):
 
         works = [
             {
-                "company":  i.get("title"),
+                "company": i.get("title"),
                 "desc": " | ".join(i.get("item")) if i.get("item") else None,
-
             }
-            for i in safe_get(parsed_directory_work, "parsed_data", "About", "directory_work", "items", default=[])
+            for i in safe_get(
+                parsed_directory_work,
+                "parsed_data",
+                "About",
+                "directory_work",
+                "items",
+                default=[],
+            )
         ]
 
         # directory_education
         parsed_directory_education = _fetch_about("directory_education")
 
         colleges = []
-        for i in safe_get(parsed_directory_education, "parsed_data", "About", "directory_college", "items", default=[]):
+        for i in safe_get(
+            parsed_directory_education,
+            "parsed_data",
+            "About",
+            "directory_college",
+            "items",
+            default=[],
+        ):
             if i.get("title") == "University":
                 continue
             item_list = i.get("item") or []
             college = {
-                "name":       i.get("title"),
-                "date":       safe_get(item_list, 0),
-                "subject":    None,
+                "name": i.get("title"),
+                "date": safe_get(item_list, 0),
+                "subject": None,
                 "activities": None,
-                "dorm":       None,
-                "classes":    None,
-                "desc":       None,
+                "dorm": None,
+                "classes": None,
+                "desc": None,
             }
             for raw in item_list[1:]:
                 text = (raw or "").strip()
@@ -1129,14 +1317,22 @@ class Profile(FacebookModel):
             colleges.append(college)
 
         high_schools = []
-        for i in safe_get(parsed_directory_education, "parsed_data", "About", "directory_high_school", "items", default=[]):
+        for i in safe_get(
+            parsed_directory_education,
+            "parsed_data",
+            "About",
+            "directory_high_school",
+            "items",
+            default=[],
+        ):
             if i.get("title") == "Secondary school":
                 continue
-            high_schools.append({
-                "name": i.get("title"),
-                "date": safe_get(i, "item", 0),
-            })
-
+            high_schools.append(
+                {
+                    "name": i.get("title"),
+                    "date": safe_get(i, "item", 0),
+                }
+            )
 
         # directory_activites
         parsed_directory_activites = _fetch_about("directory_activites")
@@ -1146,9 +1342,15 @@ class Profile(FacebookModel):
                 "name": i.get("title"),
                 "desc": safe_get(i, "item", 0),
             }
-            for i in safe_get(parsed_directory_activites, "parsed_data", "About", "directory_hobbies", "items", default=[])
+            for i in safe_get(
+                parsed_directory_activites,
+                "parsed_data",
+                "About",
+                "directory_hobbies",
+                "items",
+                default=[],
+            )
         ]
-
 
         # directory_interests
         parsed_directory_interests = _fetch_about("directory_interests")
@@ -1159,32 +1361,46 @@ class Profile(FacebookModel):
                     "name": i.get("title"),
                     "desc": safe_get(i, "item", 0),
                 }
-                for i in safe_get(parsed_directory_interests, "parsed_data", "About", node_key, "items", default=[])
+                for i in safe_get(
+                    parsed_directory_interests,
+                    "parsed_data",
+                    "About",
+                    node_key,
+                    "items",
+                    default=[],
+                )
             ]
 
         interests = {
-            "musics":   _interest_rows("directory_music"),
+            "musics": _interest_rows("directory_music"),
             "tv_shows": _interest_rows("directory_tv_shows"),
-            "movies":   _interest_rows("directory_movies"),
-            "games":    _interest_rows("directory_games"),
-            "sports":   _interest_rows("directory_sports"),
+            "movies": _interest_rows("directory_movies"),
+            "games": _interest_rows("directory_games"),
+            "sports": _interest_rows("directory_sports"),
         }
-
 
         # directory_travel
         parsed_directory_travel = _fetch_about("directory_travel")
-     
+
         travels = []
-        for i in safe_get(parsed_directory_travel, "parsed_data", "About", "directory_travel", "items", default=[]):
+        for i in safe_get(
+            parsed_directory_travel,
+            "parsed_data",
+            "About",
+            "directory_travel",
+            "items",
+            default=[],
+        ):
             raw = safe_get(i, "item", 0)
             if not raw:
                 continue
             before, sep, after = raw.rpartition(":")
-            travels.append({
-                "name": before.strip() if sep else raw.strip(),
-                "date": after.strip()  if sep else None,
-            })
-
+            travels.append(
+                {
+                    "name": before.strip() if sep else raw.strip(),
+                    "date": after.strip() if sep else None,
+                }
+            )
 
         # directory_contact_info
         parsed_directory_contact_info = _fetch_about("directory_contact_info")
@@ -1192,31 +1408,65 @@ class Profile(FacebookModel):
         def _contact_rows(node_key):
             return [
                 {
-                    "type": safe_get(i, "item", 0, default= safe_get(parsed_directory_contact_info, "parsed_data", "About", node_key, "category")),
+                    "type": safe_get(i, "item", 0,
+                        default=safe_get(
+                            parsed_directory_contact_info,
+                            "parsed_data",
+                            "About",
+                            node_key,
+                            "category",
+                        ),
+                    ),
                     "name": i.get("title"),
                 }
-                for i in safe_get(parsed_directory_contact_info, "parsed_data", "About", node_key, "items", default=[])
+                for i in safe_get(
+                    parsed_directory_contact_info,
+                    "parsed_data",
+                    "About",
+                    node_key,
+                    "items",
+                    default=[],
+                )
             ]
 
-        contacts = [{
-            "socials":         _contact_rows("directory_socials"),
-            "phones":          _contact_rows("directory_phone"),
-            "emails":          _contact_rows("directory_email"),
-            "messenger":       _contact_rows("directory_messenger"),
-            "whatsapp_number": _contact_rows("directory_whatsapp"),
-            "media_kit":       _contact_rows("directory_media_kit"),
-        }]
+        contacts = [
+            {
+                "socials": _contact_rows("directory_socials"),
+                "phones": _contact_rows("directory_phone"),
+                "emails": _contact_rows("directory_email"),
+                "messenger": _contact_rows("directory_messenger"),
+                "whatsapp_number": _contact_rows("directory_whatsapp"),
+                "media_kit": _contact_rows("directory_media_kit"),
+            }
+        ]
 
         # directory_privacy_and_legal_info
-        parsed_directory_privacy_and_legal_info = _fetch_about("directory_privacy_and_legal_info")
-        description = safe_get(parsed_directory_privacy_and_legal_info, "parsed_data", "About", "description", "items", 0, "text")
+        parsed_directory_privacy_and_legal_info = _fetch_about(
+            "directory_privacy_and_legal_info"
+        )
+        description = safe_get(
+            parsed_directory_privacy_and_legal_info,
+            "parsed_data",
+            "About",
+            "description",
+            "items",
+            0,
+            "text",
+        )
 
         # directory_names
         parsed_directory_names = _fetch_about("directory_names")
-      
+
         name_pronunciation = [
             {"name": i.get("text")}
-            for i in safe_get(parsed_directory_names, "parsed_data", "About", "name_pronunciation", "items", default=[])
+            for i in safe_get(
+                parsed_directory_names,
+                "parsed_data",
+                "About",
+                "name_pronunciation",
+                "items",
+                default=[],
+            )
             if i.get("text")
         ]
 
@@ -1225,22 +1475,28 @@ class Profile(FacebookModel):
                 "type": safe_get(i, "item", 0),
                 "name": i.get("title"),
             }
-            for i in safe_get(parsed_directory_names, "parsed_data", "About", "nicknames", "items", default=[])
+            for i in safe_get(
+                parsed_directory_names,
+                "parsed_data",
+                "About",
+                "nicknames",
+                "items",
+                default=[],
+            )
         ]
         user_data = {
-            "id": parsed_userCollectionIds["parsed_data"]["author_profile"]["id"],
-            "name": parsed_userCollectionIds["parsed_data"]["author_profile"]["name"],
-            "alternate_name": parsed_userCollectionIds["parsed_data"]["author_profile"]["alternate_name"],
-            "gender": parsed_userCollectionIds["parsed_data"]["author_profile"]["gender"],
-            "url": parsed_userCollectionIds["parsed_data"]["author_profile"]["url"],
-            "status_text": parsed_userCollectionIds["parsed_data"]["author_profile"]["status_text"],
-            "profile_picture_url": parsed_userCollectionIds["parsed_data"]["author_profile"]["profile_picture_url"],
-            "is_verified": parsed_userCollectionIds["parsed_data"]["author_profile"]["is_verified"],
+            "id": parsed_user_collection_ids["parsed_data"]["author_profile"]["id"],
+            "name": parsed_user_collection_ids["parsed_data"]["author_profile"]["name"],
+            "alternate_name": parsed_user_collection_ids["parsed_data"]["author_profile"]["alternate_name"],
+            "gender": parsed_user_collection_ids["parsed_data"]["author_profile"]["gender"],
+            "url": parsed_user_collection_ids["parsed_data"]["author_profile"]["url"],
+            "status_text": parsed_user_collection_ids["parsed_data"]["author_profile"]["status_text"],
+            "profile_picture_url": parsed_user_collection_ids["parsed_data"]["author_profile"]["profile_picture_url"],
+            "is_verified": parsed_user_collection_ids["parsed_data"]["author_profile"]["is_verified"],
 
-            "followers_count": parsed_userCollectionIds["parsed_data"]["author_profile"]["followers_count"],
-            "followees_count": parsed_userCollectionIds["parsed_data"]["author_profile"]["followees_count"],
-            "friends_count": parsed_userCollectionIds["parsed_data"]["author_profile"]["friends_count"],
-
+            "followers_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["followers_count"],
+            "followees_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["followees_count"],
+            "friends_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["friends_count"],
             "biography": biography,
             "category": category,
             "current_location": current_location,
@@ -1260,74 +1516,72 @@ class Profile(FacebookModel):
             "description": description,
             "name_pronunciation": name_pronunciation,
             "nicknames": nicknames,
-
             "business_rating": business_rating,
             "business_address": business_address,
             "business_hours": business_hours,
-
             "tabs": {
                 "About": {
-                    "id": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["id"],
+                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["id"],
                     "collections": {
-                        "directory_basic_info": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_basic_info"],
-                        "directory_specialties": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_specialties"],
-                        "directory_intro": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_intro"],
-                        "directory_category": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_category"],
-                        "directory_personal_details": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_personal_details"],
-                        "directory_links": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_links"],
-                        "directory_communities": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_communities"],
-                        "directory_offers": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_offers"],
-                        "directory_work": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_work"],
-                        "directory_education": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_education"],
-                        "directory_activites": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_activites"],
-                        "directory_interests": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_interests"],
-                        "directory_travel": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_travel"],
-                        "directory_contact_info": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_contact_info"],
-                        "directory_privacy_and_legal_info": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_privacy_and_legal_info"],
-                        "directory_names": parsed_userCollectionIds["parsed_data"]["tabs"]["About"]["collections"]["directory_names"],
+                        "directory_basic_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_basic_info"],
+                        "directory_specialties": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_specialties"],
+                        "directory_intro": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_intro"],
+                        "directory_category": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_category"],
+                        "directory_personal_details": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_personal_details"],
+                        "directory_links": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_links"],
+                        "directory_communities": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_communities"],
+                        "directory_offers": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_offers"],
+                        "directory_work": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_work"],
+                        "directory_education": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_education"],
+                        "directory_activites": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_activites"],
+                        "directory_interests": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_interests"],
+                        "directory_travel": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_travel"],
+                        "directory_contact_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_contact_info"],
+                        "directory_privacy_and_legal_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_privacy_and_legal_info"],
+                        "directory_names": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_names"],
                     },
                 },
                 "Followers": {
-                    "id": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["id"],
+                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["id"],
                     "collections": {
-                        "followers": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["followers"],
-                        "followers_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["followers_mutual"],
-                        "following": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["following"],
-                        "following_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["following_mutual"],
-                        "friends_all": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["friends_all"],
-                        "friends_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Followers"]["collections"]["friends_mutual"],
+                        "followers": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["followers"],
+                        "followers_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["followers_mutual"],
+                        "following": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["following"],
+                        "following_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["following_mutual"],
+                        "friends_all": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["friends_all"],
+                        "friends_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["friends_mutual"],
                     },
                 },
                 "Friends": {
-                    "id": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["id"],
+                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["id"],
                     "collections": {
-                        "friends_all": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_all"],
-                        "friends_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_mutual"],
-                        "friends_recent": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_recent"],
-                        "friends_with_upcoming_birthdays": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_with_upcoming_birthdays"],
-                        "friends_work": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_work"],
-                        "friends_college": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_college"],
-                        "friends_high_school": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_high_school"],
-                        "friends_current_city": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_current_city"],
-                        "friends_hometown": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["friends_hometown"],
-                        "followers": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["followers"],
-                        "following": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["following"],
-                        "followers_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["followers_mutual"],
-                        "following_mutual": parsed_userCollectionIds["parsed_data"]["tabs"]["Friends"]["collections"]["following_mutual"],
+                        "friends_all": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_all"],
+                        "friends_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_mutual"],
+                        "friends_recent": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_recent"],
+                        "friends_with_upcoming_birthdays": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_with_upcoming_birthdays"],
+                        "friends_work": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_work"],
+                        "friends_college": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_college"],
+                        "friends_high_school": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_high_school"],
+                        "friends_current_city": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_current_city"],
+                        "friends_hometown": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_hometown"],
+                        "followers": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["followers"],
+                        "following": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["following"],
+                        "followers_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["followers_mutual"],
+                        "following_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["following_mutual"],
                     },
                 },
                 "Photos": {
-                    "id": parsed_userCollectionIds["parsed_data"]["tabs"]["Photos"]["id"],
+                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["id"],
                     "collections": {
-                        "photos_by": parsed_userCollectionIds["parsed_data"]["tabs"]["Photos"]["collections"]["photos_by"],
-                        "photos_albums": parsed_userCollectionIds["parsed_data"]["tabs"]["Photos"]["collections"]["photos_albums"],
-                        "photos_of": parsed_userCollectionIds["parsed_data"]["tabs"]["Photos"]["collections"]["photos_of"],
+                        "photos_by": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_by"],
+                        "photos_albums": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_albums"],
+                        "photos_of": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_of"],
                     },
                 },
                 "Reels": {
-                    "id": parsed_userCollectionIds["parsed_data"]["tabs"]["Reels"]["id"],
+                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Reels"]["id"],
                     "collections": {
-                        "owner_reels": parsed_userCollectionIds["parsed_data"]["tabs"]["Reels"]["collections"]["owner_reels"],
+                        "owner_reels": parsed_user_collection_ids["parsed_data"]["tabs"]["Reels"]["collections"]["owner_reels"],
                     }
                 }
             },
@@ -1335,7 +1589,6 @@ class Profile(FacebookModel):
 
         self._data.update(user_data)
         self._full_fetched = True
-
 
     # ---------- identity / profile ----------
 
@@ -1438,7 +1691,6 @@ class Profile(FacebookModel):
         :rtype: str or None
         """
         return self._field("friends_count")
-
 
     # ---------- about ----------
 
@@ -1622,7 +1874,6 @@ class Profile(FacebookModel):
         """
         return self._field("name_pronunciation")
 
-
     @property
     def nicknames(self) -> Optional[list]:
         """
@@ -1646,7 +1897,6 @@ class Profile(FacebookModel):
         return self._field("is_verified")
 
     # ---------- business ----------
-
 
     @property
     def business_rating(self) -> Optional[str]:
@@ -1680,12 +1930,12 @@ class Profile(FacebookModel):
         """
 
         return self._field("business_hours")
-    
+
     @classmethod
-    def from_id(
+    def from_user_id(
         cls,
         context: FacebookContext,
-        id: str,
+        user_id: str,
     ) -> "Profile":
         """
         Create a profile from its Facebook ID.
@@ -1693,14 +1943,12 @@ class Profile(FacebookModel):
 
         :param context: Facebook context used to fetch the profile.
         :type context: FacebookContext
-        :param id: Facebook user ID.
-        :type id: str
+        :param user_id: Facebook user ID.
+        :type user_id: str
         :return: Profile with metadata fetched.
         :rtype: Profile
         """
-        profile = cls(context, {
-            "id": id
-        })
+        profile = cls(context, {"id": user_id})
         profile._obtain_metadata()
         return profile
 
@@ -1729,7 +1977,7 @@ class Profile(FacebookModel):
         match = re.search(r'"userID"\s*:\s*"(\d+)"', res.text)
         user_id = match.group(1) if match else None
         if user_id:
-                return cls.from_id(context, user_id)
+            return cls.from_user_id(context, user_id)
 
         raise ProfileNotFoundError(f"No profile found for username: {username}")
 
@@ -1742,17 +1990,19 @@ class Profile(FacebookModel):
         :raises FollowersNotAvailableException: If the follower collection
             is unavailable for this profile.
         """
-        userTimelineAppCollectionPageItemsGraphQL = ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Followers", "collections", "followers"))
+        user_timeline_app_collection_page_items_graphql = (
+            ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Followers", "collections", "followers"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise FollowersNotAvailableException(
                 f"Follower list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionPageItemsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_page_items_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -1768,7 +2018,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -1781,9 +2031,8 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_page_items",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
-
 
     def get_followees(self) -> PaginatedIterator["Profile"]:
         """
@@ -1794,17 +2043,19 @@ class Profile(FacebookModel):
         :raises FolloweesNotAvailableException: If the following collection
             is unavailable for this profile.
         """
-        userTimelineAppCollectionPageItemsGraphQL = ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Followers", "collections", "following"))
+        user_timeline_app_collection_page_items_graphql = (
+            ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Followers", "collections", "following"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise FolloweesNotAvailableException(
                 f"Following list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionPageItemsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_page_items_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -1820,7 +2071,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -1833,9 +2084,8 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_page_items",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
-
 
     def get_friends_followers(self) -> PaginatedIterator["Profile"]:
         """
@@ -1846,17 +2096,19 @@ class Profile(FacebookModel):
         :raises FriendFollowersNotAvailableException: If the corresponding
             collection is unavailable.
         """
-        userTimelineAppCollectionPageItemsGraphQL = ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Friends", "collections", "followers"))
+        user_timeline_app_collection_page_items_graphql = (
+            ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Friends", "collections", "followers"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise FriendFollowersNotAvailableException(
                 f"Friend with follower relationship list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionPageItemsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_page_items_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -1872,7 +2124,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -1885,9 +2137,8 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_page_items",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
-
 
     def get_friends_followees(self) -> PaginatedIterator["Profile"]:
         """
@@ -1899,17 +2150,19 @@ class Profile(FacebookModel):
         :raises FriendFolloweesNotAvailableException: If the corresponding
             collection is unavailable.
         """
-        userTimelineAppCollectionPageItemsGraphQL = ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Friends", "collections", "following"))
+        user_timeline_app_collection_page_items_graphql = (
+            ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Friends", "collections", "following"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise FriendFolloweesNotAvailableException(
                 f"Friend with following relationship list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionPageItemsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_page_items_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -1925,7 +2178,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -1938,7 +2191,7 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_page_items",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
 
     def get_posts(self) -> PaginatedIterator[Post]:
@@ -1948,10 +2201,10 @@ class Profile(FacebookModel):
         :return: Iterator yielding :class:`Post` objects.
         :rtype: PaginatedIterator
         """
-        timelineGraphQL = ProfileCometTimelineFeedRefetchQueryGraphQL(self._context)
+        timeline_graphql = ProfileCometTimelineFeedRefetchQueryGraphQL(self._context)
 
         def request_fn(cursor):
-            return timelineGraphQL.send(userId=self._field("id"), cursor=cursor).text
+            return timeline_graphql.send(userId=self._field("id"), cursor=cursor).text
 
         def page_wrapper(parsed):
             raw_items = [
@@ -1962,8 +2215,7 @@ class Profile(FacebookModel):
                     "title": item["title"],
                     "text": item["text"],
                     "attachments": [
-                        _attachment_to_dict(a)
-                        for a in item["attachments"]
+                        _attachment_to_dict(a) for a in item["attachments"]
                     ],
                     "share_count": item["share_count"],
                     "comments_count": item["comments_count"],
@@ -1989,7 +2241,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2004,7 +2256,7 @@ class Profile(FacebookModel):
             iterator_type="timeline",
             query_variables={"userId": self.id},
         )
-    
+
     def get_photos(self) -> PaginatedIterator[Photo]:
         """
         Iterate over photos associated with this profile.
@@ -2014,17 +2266,19 @@ class Profile(FacebookModel):
         :raises PhotoNotAvailableException: If the photo collection is
             unavailable for this profile.
         """
-        userTimelineAppCollectionPageItemsGraphQL = ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Photos", "collections", "photos_by"))
+        user_timeline_app_collection_page_items_graphql = (
+            ProfileCometAppCollectionListRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Photos", "collections", "photos_by"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise PhotoNotAvailableException(
                 f"Photo list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionPageItemsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_page_items_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -2038,7 +2292,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2055,9 +2309,9 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_page_items",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
-    
+
     def get_videos(self) -> PaginatedIterator[Video]:
         """
         Iterate over reels or short-form videos associated with this profile.
@@ -2067,17 +2321,19 @@ class Profile(FacebookModel):
         :raises ReelsNotAvailableException: If the reels collection is
             unavailable for this profile.
         """
-        userTimelineAppCollectionAggregatedFbShortsGraphQL = ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(self._context)
-        collectionId = self._field(("tabs", "Reels", "collections", "owner_reels"))
+        user_timeline_app_collection_aggregated_fb_shorts_graphql = (
+            ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(self._context)
+        )
+        collection_id = self._field(("tabs", "Reels", "collections", "owner_reels"))
 
-        if collectionId is None:
+        if collection_id is None:
             raise ReelsNotAvailableException(
                 f"Reel list is not available for user {self.id}."
             )
 
         def request_fn(cursor):
-            return userTimelineAppCollectionAggregatedFbShortsGraphQL.send(
-                collectionId=collectionId, cursor=cursor
+            return user_timeline_app_collection_aggregated_fb_shorts_graphql.send(
+                collectionId=collection_id, cursor=cursor
             ).text
 
         def page_wrapper(parsed):
@@ -2095,7 +2351,7 @@ class Profile(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2116,9 +2372,10 @@ class Profile(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="timelineapp_collection_aggregated_fb_shorts",
-            query_variables={"id": collectionId},
+            query_variables={"id": collection_id},
         )
-    
+
+
 class Comment(FacebookModel):
     """
     Facebook comment.
@@ -2137,12 +2394,20 @@ class Comment(FacebookModel):
     :param comment: Parent comment when this object represents a reply.
     :type comment: Comment or None
     """
-    def __init__(self, context: FacebookContext, data: dict, owner: Profile = None, post: Post = None, comment: "Comment"= None):
+
+    def __init__(
+        self,
+        context: FacebookContext,
+        data: dict,
+        owner: Profile = None,
+        post: Post = None,
+        comment: "Comment" = None,
+    ):
         super().__init__(context, data)
         assert "id" in self._data, "Comment requires id"
         self._owner = owner
-        self._post = post       
-        self._comment = comment   # Parent Comment | None
+        self._post = post
+        self._comment = comment  # Parent Comment | None
 
     @property
     def _identity(self):
@@ -2219,7 +2484,7 @@ class Comment(FacebookModel):
         :rtype: PaginatedIterator
         :raises MissingParentError: If the comment has no parent post.
         """
-        commentRepliesGraphQL = Depth1CommentsListPaginationQueryGraphQL(self._context)
+        comment_replies_graphql = Depth1CommentsListPaginationQueryGraphQL(self._context)
 
         if self.post is None:
             raise MissingParentError(
@@ -2237,7 +2502,7 @@ class Comment(FacebookModel):
             )
 
         def request_fn(cursor):
-            return commentRepliesGraphQL.send(
+            return comment_replies_graphql.send(
                 postId=self.post.id,
                 commentId=self.id,
                 expansionToken=self._reply_expansion_token,
@@ -2249,7 +2514,9 @@ class Comment(FacebookModel):
                 {
                     "id": item["id"],
                     "text": item["text"],
-                    "attachments": [_attachment_to_dict(att) for att in item["attachments"]],
+                    "attachments": [
+                        _attachment_to_dict(att) for att in item["attachments"]
+                    ],
                     "created_time": item["created_time"],
                     "reaction_count": item["reaction_count"],
                     "reply_count": item["reply_count"],
@@ -2266,13 +2533,14 @@ class Comment(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
         def item_wrapper(raw):
             return Comment(
-                self._context, raw,
+                self._context,
+                raw,
                 post=self._post,
                 comment=self,
             )
@@ -2290,7 +2558,6 @@ class Comment(FacebookModel):
             },
         )
 
-
     def get_reactors(self) -> PaginatedIterator[Reactor]:
         """
         Iterate over users who reacted to the comment.
@@ -2299,7 +2566,9 @@ class Comment(FacebookModel):
         :rtype: PaginatedIterator
         :raises MissingParentError: If the comment has no parent post.
         """
-        reactorsGraphQL = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(self._context)
+        reactors_graphql = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(
+            self._context
+        )
 
         if self.post is None:
             raise MissingParentError(
@@ -2307,11 +2576,11 @@ class Comment(FacebookModel):
             )
 
         def request_fn(cursor):
-            return reactorsGraphQL.send(
+            return reactors_graphql.send(
                 postId=self.post.id,
                 reactionID=None,
                 commentId=self.id,
-                type="comment",
+                itemType="comment",
                 cursor=cursor,
             ).text
 
@@ -2330,7 +2599,7 @@ class Comment(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2346,7 +2615,11 @@ class Comment(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="reactors",
-            query_variables={"postId": self.post.id, "commentId": self.id, "type": "comment"},
+            query_variables={
+                "postId": self.post.id,
+                "commentId": self.id,
+                "type": "comment",
+            },
         )
 
     @property
@@ -2360,19 +2633,23 @@ class Comment(FacebookModel):
         """
         if self._owner:
             return self._owner
-        elif self._field("author", None) is not None:
+
+        if self._field("author", None) is not None:
             data = self._field("author")
 
-            return Profile(self._context, {
-                "id": data.get("id"),
-                "name": data.get("name"),
-                "gender": data.get("gender"),
-                "url": data.get("url"),
-                "profile_picture_url": data.get("profile_picture_url"),
-            })
-        else:
-            return None
-        
+            return Profile(
+                self._context,
+                {
+                    "id": data.get("id"),
+                    "name": data.get("name"),
+                    "gender": data.get("gender"),
+                    "url": data.get("url"),
+                    "profile_picture_url": data.get("profile_picture_url"),
+                },
+            )
+
+        return None
+
     @property
     def post(self) -> Optional[Post]:
         """
@@ -2391,17 +2668,16 @@ class Comment(FacebookModel):
         :return: List of typed attachment objects.
         :rtype: list
         """
-        
+
         if self._field("attachments") is None:
             return None
-    
+
         result = []
         for att in self._field("attachments", default=[]):
             converted = _dict_to_attachment(att)
             if converted is not None:
                 result.append(converted)
         return result
-
 
 
 class Group(FacebookModel):
@@ -2416,6 +2692,7 @@ class Group(FacebookModel):
     :param data: Initial group data.
     :type data: dict
     """
+
     def __init__(self, context: FacebookContext, data: dict):
         super().__init__(context, data)
         assert "id" in self._data, "Group requires id"
@@ -2433,36 +2710,34 @@ class Group(FacebookModel):
         if self._full_fetched:
             return
 
-        groupPartialGraphQL = CometHovercardQueryRendererQueryGraphQL(self._context)
-        response_groupPartialGraphQL = groupPartialGraphQL.send(groupId=self.id)
-        parsed_groupPartialGraphQL = self._context.parse_graphql_response(response_groupPartialGraphQL.text)
+        group_partial_graphql = CometHovercardQueryRendererQueryGraphQL(self._context)
+        response_group_partial_graphql = group_partial_graphql.send(groupId=self.id)
+        parsed_group_partial_graphql = self._context.parse_graphql_response(response_group_partial_graphql.text)
 
-        
-        if parsed_groupPartialGraphQL["parsed_data"] is None:
+        if parsed_group_partial_graphql["parsed_data"] is None:
             raise GroupNotFoundError(
                 f"Group not found: {self.id}"
             )
 
-        groupAboutInfoGraphQL = CometGroupAboutRootQueryGraphQL(self._context)
-        response_groupAboutInfoGraphQL = groupAboutInfoGraphQL.send(groupId=self.id)
-        parsed_groupAboutInfoGraphQL = self._context.parse_graphql_response(response_groupAboutInfoGraphQL.text)
+        group_about_info_graphql = CometGroupAboutRootQueryGraphQL(self._context)
+        response_group_about_info_graphql = group_about_info_graphql.send(groupId=self.id)
+        parsed_group_about_info_graphql = self._context.parse_graphql_response(response_group_about_info_graphql.text)
 
         group_profile = {
-            "id": parsed_groupPartialGraphQL["parsed_data"]["id"],
-            "name": parsed_groupPartialGraphQL["parsed_data"]["name"],
-            "url": parsed_groupPartialGraphQL["parsed_data"]["url"],
-            "privacy": parsed_groupPartialGraphQL["parsed_data"]["privacy"],
-            "member_count": parsed_groupPartialGraphQL["parsed_data"]["member_count"],
-            "profile_picture_url": parsed_groupPartialGraphQL["parsed_data"]["profile_picture_url"],
-            "created_time": parsed_groupAboutInfoGraphQL["parsed_data"]["created_time"],
-            "description": parsed_groupAboutInfoGraphQL["parsed_data"]["description"],
-            "privacy_info": parsed_groupAboutInfoGraphQL["parsed_data"]["privacy_info"],
-            "discoverability_info": parsed_groupAboutInfoGraphQL["parsed_data"]["discoverability_info"],
+            "id": parsed_group_partial_graphql["parsed_data"]["id"],
+            "name": parsed_group_partial_graphql["parsed_data"]["name"],
+            "url": parsed_group_partial_graphql["parsed_data"]["url"],
+            "privacy": parsed_group_partial_graphql["parsed_data"]["privacy"],
+            "member_count": parsed_group_partial_graphql["parsed_data"]["member_count"],
+            "profile_picture_url": parsed_group_partial_graphql["parsed_data"]["profile_picture_url"],
+            "created_time": parsed_group_about_info_graphql["parsed_data"]["created_time"],
+            "description": parsed_group_about_info_graphql["parsed_data"]["description"],
+            "privacy_info": parsed_group_about_info_graphql["parsed_data"]["privacy_info"],
+            "discoverability_info": parsed_group_about_info_graphql["parsed_data"]["discoverability_info"],
         }
 
         self._data.update(group_profile)
         self._full_fetched = True
-
 
     # ---------- identity ----------
 
@@ -2575,10 +2850,10 @@ class Group(FacebookModel):
         :return: Iterator yielding :class:`Post` objects.
         :rtype: PaginatedIterator
         """
-        groupTimelineGraphQL = GroupsCometFeedRegularStoriesPaginationQueryGraphQL(self._context)
+        group_timeline_graphql = GroupsCometFeedRegularStoriesPaginationQueryGraphQL(self._context)
 
         def request_fn(cursor):
-            return groupTimelineGraphQL.send(groupId=self._field("id"), cursor=cursor).text
+            return group_timeline_graphql.send(groupId=self._field("id"), cursor=cursor).text
 
         def page_wrapper(parsed):
             raw_items = [
@@ -2589,8 +2864,7 @@ class Group(FacebookModel):
                     "title": item["title"],
                     "text": item["text"],
                     "attachments": [
-                        _attachment_to_dict(a)
-                        for a in item["attachments"]
+                        _attachment_to_dict(a) for a in item["attachments"]
                     ],
                     "share_count": item["share_count"],
                     "comments_count": item["comments_count"],
@@ -2616,7 +2890,7 @@ class Group(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2631,7 +2905,7 @@ class Group(FacebookModel):
             iterator_type="group_timeline",
             query_variables={"groupId": self.id},
         )
-        
+
     def get_members(self) -> PaginatedIterator[GroupMember]:
         """
         Iterate over members of the group.
@@ -2639,10 +2913,10 @@ class Group(FacebookModel):
         :return: Iterator yielding :class:`GroupMember` objects.
         :rtype: PaginatedIterator
         """
-        groupMemberGraphQL = GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(self._context)
+        group_member_graphql = GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(self._context)
 
         def request_fn(cursor):
-            return groupMemberGraphQL.send(
+            return group_member_graphql.send(
                 groupId=self.id,
                 cursor=cursor,
             ).text
@@ -2663,7 +2937,7 @@ class Group(FacebookModel):
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
             return raw_items, page_info
 
@@ -2686,10 +2960,10 @@ class Group(FacebookModel):
     # ---------- factory ----------
 
     @classmethod
-    def from_id(
+    def from_group_id(
         cls,
         context: FacebookContext,
-        id: str,
+        group_id: str,
     ) -> "Group":
         """
         Create a group from its Facebook ID.
@@ -2697,17 +2971,14 @@ class Group(FacebookModel):
 
         :param context: Facebook context used to fetch the group.
         :type context: FacebookContext
-        :param id: Facebook group ID.
-        :type id: str
+        :param group_id: Facebook group ID.
+        :type group_id: str
         :return: Group with metadata fetched.
         :rtype: Group
         """
-        group_profile = cls(context, {
-            "id": id
-        })
+        group_profile = cls(context, {"id": group_id})
         group_profile._obtain_metadata()
         return group_profile
-
 
     @classmethod
     def from_groupname(
@@ -2732,12 +3003,12 @@ class Group(FacebookModel):
 
         res = context.get(f"https://web.facebook.com/groups/{groupname}")
         match = re.search(r'"groupID"\s*:\s*"(\d+)"', res.text)
-        user_id = match.group(1) if match else None
-        if user_id:
-                return cls.from_id(context, user_id)
+        group_id = match.group(1) if match else None
+        if group_id:
+            return cls.from_group_id(context, group_id)
 
-        raise GroupNotFoundError(f"No profile found for username: {groupname}")
-    
+        raise GroupNotFoundError(f"No group found for groupname: {groupname}")
+
 
 class MarketplaceListing(FacebookModel):
     """
@@ -2755,6 +3026,7 @@ class MarketplaceListing(FacebookModel):
     :param seller: The :class:`Profile` that owns the listing, if known.
     :type seller: Profile or None
     """
+
     def __init__(self, context: FacebookContext, data: dict):
         super().__init__(context, data)
         assert "id" in self._data, "MarketplaceListing requires id"
@@ -2774,23 +3046,23 @@ class MarketplaceListing(FacebookModel):
         if self._full_fetched:
             return
 
-        marketPlacePdpGraphQl = MarketplacePDPContainerQueryGraphQL(self._context)
-        response_marketPlacePdpGraphQl = marketPlacePdpGraphQl.send(marketListingId=self.id)
-        parsed_marketPlacePdpGraphQl = self._context.parse_graphql_response(response_marketPlacePdpGraphQl.text)
+        marketplace_pdp_graphql = MarketplacePDPContainerQueryGraphQL(self._context)
+        response_marketplace_pdp_graphql = marketplace_pdp_graphql.send(marketListingId=self.id)
+        parsed_marketplace_pdp_graphql = self._context.parse_graphql_response(response_marketplace_pdp_graphql.text)
 
-        if parsed_marketPlacePdpGraphQl["parsed_data"] is None:
+        if parsed_marketplace_pdp_graphql["parsed_data"] is None:
             raise MarketplaceListingNotFoundError(
                 f"Marketplace listing not found: {self.id}"
             )
-        
+
         # Fetch media separately (Meta splits PDP into two responses)
 
-        marketPlacePdpMediaGraphQl = MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL(self._context)
-        response_marketPlacePdpMediaGraphQl = marketPlacePdpMediaGraphQl.send(marketListingId=self.id)
-        parsed_marketPlacePdpMediaGraphQl = self._context.parse_graphql_response(response_marketPlacePdpMediaGraphQl.text)
+        marketplace_pdp_media_graphql = MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL(self._context)
+        response_marketplace_pdp_media_graphql = marketplace_pdp_media_graphql.send(marketListingId=self.id)
+        parsed_marketplace_pdp_media_graphql = self._context.parse_graphql_response(response_marketplace_pdp_media_graphql.text)
 
-        
-        listing = parsed_marketPlacePdpGraphQl["parsed_data"]["listing"]
+
+        listing = parsed_marketplace_pdp_graphql["parsed_data"]["listing"]
         seller = listing["seller"]
         seller_profile = seller["profile"]
         partner = listing["partner"]
@@ -2798,40 +3070,35 @@ class MarketplaceListing(FacebookModel):
         seller_stats = seller["seller_stats"]
         combined_stats = seller["seller_buyer_combined"]
 
-        marketListing_data = {
-            "id":                     listing["id"],
-            "category_id":            listing["category_id"],
-            "url":                    listing["url"],
-            "post_id":                listing["post_id"],
-            "creation_time":          listing["creation_time"],
-
-            "currency":               listing["currency"],
-            "price":                  listing["price"],
-            "strikethrough_price":    listing["strikethrough_price"],
-
-            "location_text":          listing["location_text"],
-            "latitude":               listing["latitude"],
-            "longitude":              listing["longitude"],
-
-            "title":                  listing["title"],
-            "description":            listing["description"],
-            "discounts_text":         listing["discounts_text"],
-
-            "is_live":                listing["is_live"],
-            "is_pending":             listing["is_pending"],
-            "is_sold":                listing["is_sold"],
-            "is_hidden":              listing["is_hidden"],
-            "is_on_marketplace":      listing["is_on_marketplace"],
-
+        market_listing_data = {
+            "id": listing["id"],
+            "category_id": listing["category_id"],
+            "url": listing["url"],
+            "post_id": listing["post_id"],
+            "creation_time": listing["creation_time"],
+            "currency": listing["currency"],
+            "price": listing["price"],
+            "strikethrough_price": listing["strikethrough_price"],
+            "location_text": listing["location_text"],
+            "latitude": listing["latitude"],
+            "longitude": listing["longitude"],
+            "title": listing["title"],
+            "description": listing["description"],
+            "discounts_text": listing["discounts_text"],
+            "is_live": listing["is_live"],
+            "is_pending": listing["is_pending"],
+            "is_sold": listing["is_sold"],
+            "is_hidden": listing["is_hidden"],
+            "is_on_marketplace": listing["is_on_marketplace"],
             "seller": {
                 "profile": {
-                    "id":                   seller_profile["id"],
-                    "name":                 seller_profile["name"],
-                    "profile_picture_url":  seller_profile["profile_picture_url"],
-                    "joined_time":          seller_profile["joined_time"],
+                    "id": seller_profile["id"],
+                    "name": seller_profile["name"],
+                    "profile_picture_url": seller_profile["profile_picture_url"],
+                    "joined_time": seller_profile["joined_time"],
                 },
-                "verified_badge":               seller["verified_badge"],
-                "seller_ratings_are_private":   seller["seller_ratings_are_private"],
+                "verified_badge": seller["verified_badge"],
+                "seller_ratings_are_private": seller["seller_ratings_are_private"],
                 "seller_stats": {
                     "five_star_ratings_average":            seller_stats["five_star_ratings_average"],
                     "five_star_total_rating_count_by_role": seller_stats["five_star_total_rating_count_by_role"],
@@ -2842,12 +3109,11 @@ class MarketplaceListing(FacebookModel):
                     "five_star_total_rating_count_by_role": combined_stats["five_star_total_rating_count_by_role"],
                 },
             },
-
             "partner": {
                 "profile": {
-                    "id":                   partner_profile["id"],
-                    "name":                 partner_profile["name"],
-                    "profile_picture_url":  partner_profile["profile_picture_url"],
+                    "id": partner_profile["id"],
+                    "name": partner_profile["name"],
+                    "profile_picture_url": partner_profile["profile_picture_url"],
                 },
                 "partner_brand_name": partner["partner_brand_name"],
                 "seller_review_count": partner["seller_review_count"],
@@ -2856,52 +3122,45 @@ class MarketplaceListing(FacebookModel):
                 "number_of_sold_listings": partner["number_of_sold_listings"],
                 "average_ship_time": partner["average_ship_time"],
             },
-
             "shipping_cost_text": listing["shipping_cost_text"],
             "has_shipping_cost": listing["has_shipping_cost"],
             "delivery_window_text": listing["delivery_window_text"],
             "product_details_page_uri": listing["product_details_page_uri"],
-
-
             "attributes": [
                 {
-                    "name":  a["name"],
+                    "name": a["name"],
                     "value": a["value"],
                 }
                 for a in listing["attributes"]
             ],
-
-            "delivery_types":            listing["delivery_types"],
-            "is_shipping_offered":       listing["is_shipping_offered"],
-            "is_buy_now_enabled":        listing["is_buy_now_enabled"],
-            "is_checkout_enabled":       listing["is_checkout_enabled"],
-            "is_cart_enabled":           listing["is_cart_enabled"],
-            "is_purchase_protected":     listing["is_purchase_protected"],
-            "inventory_count":           listing["inventory_count"],
-            "messaging_enabled":         listing["messaging_enabled"],
-            "created_with_seller_app":   listing["created_with_seller_app"],
-            "product_details_type":      listing["product_details_type"],
-
+            "delivery_types": listing["delivery_types"],
+            "is_shipping_offered": listing["is_shipping_offered"],
+            "is_buy_now_enabled": listing["is_buy_now_enabled"],
+            "is_checkout_enabled": listing["is_checkout_enabled"],
+            "is_cart_enabled": listing["is_cart_enabled"],
+            "is_purchase_protected": listing["is_purchase_protected"],
+            "inventory_count": listing["inventory_count"],
+            "messaging_enabled": listing["messaging_enabled"],
+            "created_with_seller_app": listing["created_with_seller_app"],
+            "product_details_type": listing["product_details_type"],
             "photos": [
                 {
-                    "id":  p["id"],
+                    "id": p["id"],
                     "image_url": p["image_url"],
                 }
-                for p in parsed_marketPlacePdpMediaGraphQl["parsed_data"]["media"]["photos"]
+                for p in parsed_marketplace_pdp_media_graphql["parsed_data"]["media"]["photos"]
             ],
-            "videos":[
+            "videos": [
                 {
-                    "id":  v["id"],
+                    "id": v["id"],
                     "thumbnail_image_url": v["thumbnail_image_url"],
                     "video_url": v["playable_url_hd"] if v["playable_url_hd"] is not None else v["playable_url"]
                 }
-                for v in parsed_marketPlacePdpMediaGraphQl["parsed_data"]["media"]["videos"]
-            ]
+                for v in parsed_marketplace_pdp_media_graphql["parsed_data"]["media"]["videos"]
+            ],
         }
 
-
-
-        self._data.update(marketListing_data)
+        self._data.update(market_listing_data)
         self._full_fetched = True
 
     # ---------- identity ----------
@@ -3158,7 +3417,6 @@ class MarketplaceListing(FacebookModel):
         """
         return self._field("product_details_type")
 
-
     @property
     def shipping_cost_text(self) -> Optional[str]:
         """
@@ -3173,7 +3431,6 @@ class MarketplaceListing(FacebookModel):
         """
         return self._field("shipping_cost_text")
 
-
     @property
     def has_shipping_cost(self) -> Optional[bool]:
         """
@@ -3185,7 +3442,6 @@ class MarketplaceListing(FacebookModel):
         :rtype: bool or None
         """
         return self._field("has_shipping_cost")
-
 
     @property
     def delivery_window_text(self) -> Optional[str]:
@@ -3200,7 +3456,6 @@ class MarketplaceListing(FacebookModel):
         :rtype: str or None
         """
         return self._field("delivery_window_text")
-
 
     @property
     def product_details_page_uri(self) -> Optional[str]:
@@ -3231,7 +3486,7 @@ class MarketplaceListing(FacebookModel):
 
         if self._field("photos") is None:
             return None
-        
+
         photos = self._field("photos", default=[])
         return [
             Photo(
@@ -3252,14 +3507,14 @@ class MarketplaceListing(FacebookModel):
 
         if self._field("videos") is None:
             return None
-        
+
         videos = self._field("videos", default=[])
         return [
             Video(
-            id=v.get("id"),
-            thumbnail_image_url=v.get("thumbnail_image_url"),
-            video_url=v.get("video_url"),
-        )
+                id=v.get("id"),
+                thumbnail_image_url=v.get("thumbnail_image_url"),
+                video_url=v.get("video_url"),
+            )
             for v in videos
         ]
 
@@ -3280,7 +3535,6 @@ class MarketplaceListing(FacebookModel):
 
         if self._field("product_details_type") == "PARTNER_LISTING":
             return None
-    
 
         seller_data = self._field("seller")
         if not seller_data:
@@ -3293,28 +3547,42 @@ class MarketplaceListing(FacebookModel):
             combined_stats = seller_data.get("seller_buyer_combined") or {}
 
             return Seller(
-                profile=Profile(self._context, {
-                    "id":                  profile_data.get("id"),
-                    "name":                profile_data.get("name"),
-                    "profile_picture_url": profile_data.get("profile_picture_url"),
-                }),
+                profile=Profile(
+                    self._context,
+                    {
+                        "id": profile_data.get("id"),
+                        "name": profile_data.get("name"),
+                        "profile_picture_url": profile_data.get("profile_picture_url"),
+                    },
+                ),
                 is_verified=seller_data.get("verified_badge"),
-
                 seller_ratings_average=seller_stats.get("five_star_ratings_average"),
-                seller_ratings_count=seller_stats.get("five_star_total_rating_count_by_role"),
-                seller_ratings_are_private=seller_data.get("seller_ratings_are_private"),
-
-                combined_ratings_average=combined_stats.get("five_star_ratings_average"),
-                combined_ratings_count=combined_stats.get("five_star_total_rating_count_by_role"),
-                combined_ratings_are_private=seller_data.get("seller_buyer_combined_ratings_are_private"),
+                seller_ratings_count=seller_stats.get(
+                    "five_star_total_rating_count_by_role"
+                ),
+                seller_ratings_are_private=seller_data.get(
+                    "seller_ratings_are_private"
+                ),
+                combined_ratings_average=combined_stats.get(
+                    "five_star_ratings_average"
+                ),
+                combined_ratings_count=combined_stats.get(
+                    "five_star_total_rating_count_by_role"
+                ),
+                combined_ratings_are_private=seller_data.get(
+                    "seller_buyer_combined_ratings_are_private"
+                ),
             )
 
         return Seller(
-            profile=Profile(self._context, {
-                "id":                  seller_data.get("id"),
-                "name":                seller_data.get("name"),
-                "profile_picture_url": seller_data.get("profile_picture_url"),
-            }),
+            profile=Profile(
+                self._context,
+                {
+                    "id": seller_data.get("id"),
+                    "name": seller_data.get("name"),
+                    "profile_picture_url": seller_data.get("profile_picture_url"),
+                },
+            ),
         )
 
     @property
@@ -3331,7 +3599,7 @@ class MarketplaceListing(FacebookModel):
 
         if self._field("product_details_type") != "PARTNER_LISTING":
             return None
-        
+
         partner_data = self._field("partner")
         if not partner_data:
             return None
@@ -3339,31 +3607,29 @@ class MarketplaceListing(FacebookModel):
         profile_data = partner_data.get("profile") or {}
 
         return PartnerSeller(
-            profile=Profile(self._context, {
-                "id": profile_data.get("id"),
-                "name": profile_data.get("name"),
-                "profile_picture_url": profile_data.get("profile_picture_url"),
-            }),
-
+            profile=Profile(
+                self._context,
+                {
+                    "id": profile_data.get("id"),
+                    "name": profile_data.get("name"),
+                    "profile_picture_url": profile_data.get("profile_picture_url"),
+                },
+            ),
             partner_brand_name=partner_data.get("partner_brand_name"),
             seller_review_count=partner_data.get("seller_review_count"),
-            seller_positive_ratings_pct=partner_data.get(
-                "seller_positive_ratings_pct"
-            ),
+            seller_positive_ratings_pct=partner_data.get("seller_positive_ratings_pct"),
             seller_member_since=partner_data.get("seller_member_since"),
-            number_of_sold_listings=partner_data.get(
-                "number_of_sold_listings"
-            ),
+            number_of_sold_listings=partner_data.get("number_of_sold_listings"),
             average_ship_time=partner_data.get("average_ship_time"),
         )
 
     # ---------- factory ----------
 
     @classmethod
-    def from_id(
+    def from_listing_id(
         cls,
         context: FacebookContext,
-        id: str,
+        listing_id: str,
     ) -> "MarketplaceListing":
         """
         Create a marketplace listing from its Facebook ID.
@@ -3371,16 +3637,16 @@ class MarketplaceListing(FacebookModel):
 
         :param context: Facebook context used to fetch the listing.
         :type context: FacebookContext
-        :param id: Facebook listing ID.
-        :type id: str
+        :param listing_id: Facebook listing ID.
+        :type listing_id: str
         :return: Listing with metadata fetched.
         :rtype: MarketplaceListing
         """
-        listing = cls(context, {"id": id})
+        listing = cls(context, {"id": listing_id})
         listing._obtain_metadata()
         return listing
 
-    
+
 class SearchEngine:
     """
     Facebook search service.
@@ -3392,16 +3658,22 @@ class SearchEngine:
     def __init__(self, context: FacebookContext):
         self._context = context
 
-
     @overload
-    def search(self, text: str, filter_type: Literal["profile"], exact_match: bool = ...) -> PaginatedIterator[Profile]: ...
+    def search(
+        self, text: str, filter_type: Literal["profile"], exact_match: bool = ...
+    ) -> PaginatedIterator[Profile]: ...
     @overload
-    def search(self, text: str, filter_type: Literal["post"],    exact_match: bool = ...) -> PaginatedIterator[Post]: ...
+    def search(
+        self, text: str, filter_type: Literal["post"], exact_match: bool = ...
+    ) -> PaginatedIterator[Post]: ...
     @overload
-    def search(self, text: str, filter_type: Literal["group"],   exact_match: bool = ...) -> PaginatedIterator[Group]: ...
+    def search(
+        self, text: str, filter_type: Literal["group"], exact_match: bool = ...
+    ) -> PaginatedIterator[Group]: ...
     @overload
-    def search(self, text: str, filter_type: Literal["all"] = ..., exact_match: bool = ...) -> PaginatedIterator[Profile | Post | Group]: ...
-
+    def search(
+        self, text: str, filter_type: Literal["all"] = ..., exact_match: bool = ...
+    ) -> PaginatedIterator[Profile | Post | Group]: ...
 
     def search(self, text, filter_type="all", exact_match=False):
         """
@@ -3418,12 +3690,14 @@ class SearchEngine:
         :rtype: PaginatedIterator
         """
 
-        serpGraphQl = SearchCometResultsPaginatedResultsQueryGraphQL(self._context)
+        serp_graphql = SearchCometResultsPaginatedResultsQueryGraphQL(self._context)
 
         def request_fn(cursor):
-            return serpGraphQl.send(
-                text=text, filter_type=filter_type,
-                exact_match=exact_match, cursor=cursor,
+            return serp_graphql.send(
+                text=text,
+                filter_type=filter_type,
+                exact_match=exact_match,
+                cursor=cursor,
             ).text
 
         def page_wrapper(parsed):
@@ -3438,7 +3712,7 @@ class SearchEngine:
                             "url": p["url"],
                             "profile_picture_url": p["profile_picture_url"],
                             "is_verified": p["is_verified"],
-                        }
+                        },
                     },
                 )
             for p in parsed["parsed_data"]["posts"]:
@@ -3453,9 +3727,9 @@ class SearchEngine:
                                 "type": p["author"]["type"],
                                 "id": p["author"]["id"],
                                 "name": p["author"]["name"],
-                                "url": p["author"]["url"]
+                                "url": p["author"]["url"],
                             },
-                        }
+                        },
                     }
                 )
             for g in parsed["parsed_data"]["groups"]:
@@ -3463,19 +3737,22 @@ class SearchEngine:
                     {
                         "type": "group",
                         "data": {
-                            "id":  g["id"],
+                            "id": g["id"],
                             "name": g["name"],
                             "url": g["url"],
                             "profile_picture_url": g["profile_picture_url"],
-                        }
+                        },
                     }
                 )
             return raw, parsed["parsed_data"]["page_info"]
 
         def item_wrapper(raw):
-            if raw["type"] == "profile": return Profile(self._context, raw["data"])
-            if raw["type"] == "post":    return Post(self._context, raw["data"])
-            if raw["type"] == "group":   return Group(self._context, raw["data"])
+            if raw["type"] == "profile":
+                return Profile(self._context, raw["data"])
+            if raw["type"] == "post":
+                return Post(self._context, raw["data"])
+            if raw["type"] == "group":
+                return Group(self._context, raw["data"])
 
         return PaginatedIterator(
             request_fn=request_fn,
@@ -3483,8 +3760,11 @@ class SearchEngine:
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="serp_search",
-            query_variables={"text": text, "filter_type": filter_type,
-                             "exact_match": exact_match},
+            query_variables={
+                "text": text,
+                "filter_type": filter_type,
+                "exact_match": exact_match,
+            },
         )
 
     def search_marketplace(
@@ -3492,9 +3772,9 @@ class SearchEngine:
         query: str,
         *,
         is_stock_available: bool = True,
-        filter_location_latitude: float= 40.7128,
-        filter_location_longitude: float= -74.0060,
-        filter_price_lower_bound: int= 0, 
+        filter_location_latitude: float = 40.7128,
+        filter_location_longitude: float = -74.0060,
+        filter_price_lower_bound: int = 0,
         filter_price_upper_bound: int = 2147483647,
         filter_radius_km: int = 500,
         item_condition: str = None,
@@ -3533,10 +3813,12 @@ class SearchEngine:
         :return: Iterator yielding :class:`MarketplaceListing` objects.
         :rtype: PaginatedIterator
         """
-        marketPlaceSearcGraphQl = CometMarketplaceSearchContentPaginationQueryGraphQL(self._context)
+        marketplace_search_graphql = CometMarketplaceSearchContentPaginationQueryGraphQL(
+            self._context
+        )
 
         def request_fn(cursor):
-            return marketPlaceSearcGraphQl.send(
+            return marketplace_search_graphql.send(
                 query=query,
                 cursor=cursor,
                 is_stock_available=is_stock_available,
@@ -3560,7 +3842,7 @@ class SearchEngine:
                     "currency": listing["currency"],
                     "price": listing["price"],
                     "strikethrough_price": listing["strikethrough_price"],
-                    "location_text": f"{listing['location']['city']}, {listing['location']['state']}" ,
+                    "location_text": f"{listing['location']['city']}, {listing['location']['state']}",
                     "is_hidden": listing["is_hidden"],
                     "is_live": listing["is_live"],
                     "is_pending": listing["is_pending"],
@@ -3568,26 +3850,30 @@ class SearchEngine:
                     "created_with_seller_app": listing["created_with_seller_app"],
                     "delivery_types": listing["delivery_types"],
                     "seller": {
-                            "profile": {
+                        "profile": {
                             "id": listing["seller"]["profile"]["id"],
                             "name": listing["seller"]["profile"]["name"],
                         },
                     },
-                    "photos": [{
-                        "id": listing["listing_photo"]["id"],
-                        "image_url": listing["listing_photo"]["image_url"],
-                    }] if listing["listing_photo"] else [],
-
-                    "videos": [{"id": listing["video"]["id"]}] if listing["video"] else []
-
+                    "photos": [
+                        {
+                            "id": listing["listing_photo"]["id"],
+                            "image_url": listing["listing_photo"]["image_url"],
+                        }
+                    ]
+                    if listing["listing_photo"]
+                    else [],
+                    "videos": [{"id": listing["video"]["id"]}]
+                    if listing["video"]
+                    else [],
                 }
                 for listing in parsed["parsed_data"]["listings"]
             ]
             page_info = {
                 "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor":    parsed["parsed_data"]["page_info"]["end_cursor"],
+                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
             }
-            return raw_items , page_info
+            return raw_items, page_info
 
         def item_wrapper(raw):
             return MarketplaceListing(self._context, raw)
@@ -3609,5 +3895,5 @@ class SearchEngine:
                 "item_condition": item_condition,
                 "last_n_days": last_n_days,
                 "sort_by": sort_by,
-            }
+            },
         )

@@ -19,7 +19,7 @@ Group can be created with:
 <Tabs>
 <TabItem value="id" label="From ID" default>
 
-<code className="signature">Group.from_id(context: <Link to="/facebook-context">FacebookContext</Link>, id: str) -> <Link to="/models/group">Group</Link></code>
+<code className="signature">Group.from_group_id(context: <Link to="/facebook-context">FacebookContext</Link>, group_id: str) -> <Link to="/models/group">Group</Link></code>
 
 </TabItem>
 <TabItem value="groupname" label="From groupname">
@@ -27,7 +27,7 @@ Group can be created with:
 <code className="signature">Group.from_groupname(context: <Link to="/facebook-context">FacebookContext</Link>, groupname: str) -> <Link to="/models/group">Group</Link></code>
 
 :::note
-The groupname is resolved to an ID using regex matching. Prefer `from_id` when possible.
+The groupname is resolved to an ID using regex matching. Prefer `from_group_id` when possible.
 :::
 
 </TabItem>
@@ -64,8 +64,8 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-group = fgs.Group.from_id(context, id="2781022932139267")
-# Or from groupname: group = fgs.Group.from_id(ctx, groupname="workingmemes")
+group = fgs.Group.from_group_id(context, group_id="2781022932139267")
+# Or from groupname: group = fgs.Group.from_groupname(ctx, groupname="workingmemes")
 
 for member in group.get_members():
     print(member.join_status, member.contribution_score, member.profile.name)

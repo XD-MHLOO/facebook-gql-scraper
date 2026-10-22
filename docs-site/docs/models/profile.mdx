@@ -19,7 +19,7 @@ Profile can be created with:
 <Tabs>
 <TabItem value="id" label="From ID" default>
 
-<code className="signature">Profile.from_id(context: <Link to="/facebook-context">FacebookContext</Link>, id: str) -> <Link to="/models/profile">Profile</Link></code>
+<code className="signature">Profile.from_user_id(context: <Link to="/facebook-context">FacebookContext</Link>, user_id: str) -> <Link to="/models/profile">Profile</Link></code>
 
 </TabItem>
 <TabItem value="username" label="From username">
@@ -27,7 +27,7 @@ Profile can be created with:
 <code className="signature">Profile.from_username(context: <Link to="/facebook-context">FacebookContext</Link>, username: str) -> <Link to="/models/profile">Profile</Link></code>
 
 :::note
-The username is resolved to an ID using regex matching. Prefer `from_id` when possible.
+The username is resolved to an ID using regex matching. Prefer `from_user_id` when possible.
 :::
 
 </TabItem>
@@ -153,7 +153,7 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-user = fgs.Profile.from_id(context, id="100084254631043")
+user = fgs.Profile.from_user_id(context, user_id="100084254631043")
 # Or from username: user = fgs.Profile.from_username(ctx, username="Ishowspeed")
 
 

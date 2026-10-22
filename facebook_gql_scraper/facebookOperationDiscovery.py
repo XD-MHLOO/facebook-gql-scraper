@@ -196,7 +196,7 @@ class FacebookOperationDiscovery:
                 # Check whether the target operation is registered and resolvable.
                 if self._has_operation(v8, operation_name):
                     break
-                
+
             except Exception:
                 logger.warning(
                     "Could not evaluate Facebook script %s",

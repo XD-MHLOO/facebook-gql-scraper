@@ -37,7 +37,7 @@ import json
 import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
-user = fgs.Profile.from_id(context, id="100084254631043")
+user = fgs.Profile.from_user_id(context, user_id="100084254631043")
 
 it = user.get_posts()
 for i, post in enumerate(it):

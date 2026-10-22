@@ -46,12 +46,12 @@ class TestFacebook(unittest.TestCase):
     # ========================================================
 
     def test_profile(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
         self.assertIsNotNone(user)
         self.assertEqual(user.id, PROFILE_ID)
 
     def test_profile_posts(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
         posts = []
         for i, post in enumerate(user.get_posts()):
@@ -62,7 +62,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(posts) > 0)
 
     def test_profile_photos(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
         photos = []
         for i, photo in enumerate(user.get_photos()):
@@ -73,7 +73,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(photos) > 0)
 
     def test_profile_videos(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
         videos = []
         for i, video in enumerate(user.get_videos()):
@@ -84,7 +84,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(videos) > 0)
 
     def test_profile_followees(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
         followees = []
         for i, followee in enumerate(user.get_followees()):
@@ -95,7 +95,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(followees) > 0)
 
     def test_profile_followers(self):
-        user = fgs.Profile.from_id(self.fbContext, id=PROFILE_ID)
+        user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
         followers = []
         for i, follower in enumerate(user.get_followers()):
@@ -106,7 +106,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(followers) > 0)
 
     # def test_friends_followees(self):
-    #     user = fgs.Profile.from_id(self.fbContext, id=FRIENDS_PROFILE_ID)
+    #     user = fgs.Profile.from_user_id(self.fbContext, user_id=FRIENDS_PROFILE_ID)
 
     #     followees = []
     #     for i, followee in enumerate(user.get_friends_followees()):
@@ -117,7 +117,7 @@ class TestFacebook(unittest.TestCase):
     #     self.assertTrue(len(followees) > 0)
 
     # def test_friends_followers(self):
-    #     user = fgs.Profile.from_id(self.fbContext, id=FRIENDS_PROFILE_ID)
+    #     user = fgs.Profile.from_user_id(self.fbContext, user_id=FRIENDS_PROFILE_ID)
 
     #     followers = []
     #     for i, follower in enumerate(user.get_friends_followers()):
@@ -132,12 +132,12 @@ class TestFacebook(unittest.TestCase):
     # ========================================================
 
     def test_post(self):
-        post = fgs.Post.from_id(self.fbContext, id=POST_ID)
+        post = fgs.Post.from_post_id(self.fbContext, post_id=POST_ID)
         self.assertIsNotNone(post)
         self.assertEqual(post.id, POST_ID)
 
     def test_post_comments(self):
-        post = fgs.Post.from_id(self.fbContext, id=POST_ID)
+        post = fgs.Post.from_post_id(self.fbContext, post_id=POST_ID)
 
         comments = []
         for i, comment in enumerate(post.get_comments()):
@@ -148,7 +148,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(comments) > 0)
 
     def test_post_reactors(self):
-        post = fgs.Post.from_id(self.fbContext, id=POST_ID)
+        post = fgs.Post.from_post_id(self.fbContext, post_id=POST_ID)
 
         reactors = []
         for i, reactor in enumerate(post.get_reactors()):
@@ -163,7 +163,7 @@ class TestFacebook(unittest.TestCase):
     # ========================================================
 
     def test_comment_reactors_and_replies(self):
-        post = fgs.Post.from_id(self.fbContext, id=POST_ID)
+        post = fgs.Post.from_post_id(self.fbContext, post_id=POST_ID)
 
         found_comment = False
         reactors = []
@@ -195,12 +195,12 @@ class TestFacebook(unittest.TestCase):
     # ========================================================
 
     def test_group(self):
-        group = fgs.Group.from_id(self.fbContext, id=GROUP_ID)
+        group = fgs.Group.from_group_id(self.fbContext, group_id=GROUP_ID)
         self.assertIsNotNone(group)
         self.assertEqual(group.id, GROUP_ID)
 
     def test_group_members(self):
-        group = fgs.Group.from_id(self.fbContext, id=GROUP_ID)
+        group = fgs.Group.from_group_id(self.fbContext, group_id=GROUP_ID)
 
         members = []
         for i, member in enumerate(group.get_members()):
@@ -211,7 +211,7 @@ class TestFacebook(unittest.TestCase):
         self.assertTrue(len(members) > 0)
 
     def test_group_posts(self):
-        group = fgs.Group.from_id(self.fbContext, id=GROUP_ID)
+        group = fgs.Group.from_group_id(self.fbContext, group_id=GROUP_ID)
 
         posts = []
         for i, post in enumerate(group.get_posts()):
@@ -259,7 +259,7 @@ class TestFacebook(unittest.TestCase):
             self.assertIsNotNone(listing.id)
 
     def test_marketplace_listing(self):
-        """Discover a live listing via search, then load it via from_id()."""
+        """Discover a live listing via search, then load it via from_listing_id()."""
         engine = fgs.SearchEngine(self.fbContext)
 
         listing_id = None
@@ -271,8 +271,8 @@ class TestFacebook(unittest.TestCase):
         if listing_id is None:
             self.skipTest("No live Marketplace listing available.")
 
-        listing = fgs.MarketplaceListing.from_id(
-            self.fbContext, id=listing_id
+        listing = fgs.MarketplaceListing.from_listing_id(
+            self.fbContext, listing_id=listing_id
         )
 
         self.assertIsNotNone(listing)

@@ -6,7 +6,7 @@ REMOVE_KEYS = {
     "__isFeedUnit", "__isICometStorySection", "__isStoryAttachmentStyleRendererUnion",
     "__isTrackableFeedUnit", "__isVideoOwner",
     "__module_operation_", "__module_component_", "__dr",
-    
+
     # UI rendering (remove CSS-like structures, but NOT "text")
     # "styles",  # need to KEEP this
     "style_list", "attributes", "children", "tag", "checksum",

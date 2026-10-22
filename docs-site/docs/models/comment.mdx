@@ -58,7 +58,7 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-post = fgs.Post.from_id(context, id="253053527513133")
+post = fgs.Post.from_post_id(context, post_id="253053527513133")
 
 for comment in post.get_comments():
     print(comment.id, comment.text)

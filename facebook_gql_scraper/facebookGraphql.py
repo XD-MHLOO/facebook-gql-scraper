@@ -1,20 +1,28 @@
 import json
-import requests
 import base64
 import logging
 import os
 import re
 from datetime import datetime, timezone, timedelta, date
-from typing import Optional
+from typing import Optional, Literal
+
+import requests
 
 from . import __version__
 from .facebookConsolidater import consolidate_jsonl
 from .unifiedFacebookParser import parse_facebook_payload
-from .exceptions import DocIdStillInvalidError, DtsgTokenStillInvalidError, DtsgTokenFetchError, SessionExpiredError, SchemaChangedError
+from .exceptions import (
+    DocIdStillInvalidError,
+    DtsgTokenStillInvalidError,
+    DtsgTokenFetchError,
+    SessionExpiredError,
+    SchemaChangedError,
+)
 from .facebookNoiseRemoval import remove_raw_facebook_json_noise
 from .facebookOperationDiscovery import FacebookOperationDiscovery
 
 logger = logging.getLogger(__name__)
+
 
 class FacebookContext:
     """
@@ -32,15 +40,15 @@ class FacebookContext:
     """
 
     def __init__(
-            self, 
-            cookies_file: str = "facebook_cookies.json", 
-            state_file: str = "facebook_state.json", 
-            user_agent: Optional[str] = None,
-            proxy: Optional[str] = None,
-            quiet: bool = False, 
-            debug: bool = False, 
-            debug_dir: str = "graphql_debug"
-        ):
+        self,
+        cookies_file: str = "facebook_cookies.json",
+        state_file: str = "facebook_state.json",
+        user_agent: Optional[str] = None,
+        proxy: Optional[str] = None,
+        quiet: bool = False,
+        debug: bool = False,
+        debug_dir: str = "graphql_debug",
+    ):
         self.quiet = quiet
         self.debug = debug
         self.debug_dir = debug_dir
@@ -52,48 +60,51 @@ class FacebookContext:
             )
 
         self.session = requests.Session()
-        self.session.headers.update({
-                    "user-agent": user_agent,
-                    'accept': '*/*',
-                    'accept-language': 'en-GB,en-US;q=0.9,en;q=0.8',
-                    'cache-control': 'no-cache',
-                    'content-type': 'application/x-www-form-urlencoded',
-                    'origin': 'https://web.facebook.com',
-                    'pragma': 'no-cache',
-                    'priority': 'u=1, i',
-                    'sec-fetch-site': 'same-origin',
-        
-                    # Below are optional to have
-                    'referer': 'https://web.facebook.com/',
-                    'sec-ch-ua': '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
-                    'sec-ch-ua-full-version-list': '"Chromium";v="152.0.7977.83", "Not?A_Brand";v="24.0.0.0", "Google Chrome";v="152.0.7977.83"',
-                    'sec-ch-ua-mobile': '?0',
-                    'sec-ch-ua-model': '""',
-                    'sec-ch-ua-platform': '"Windows"',
-                    'sec-ch-ua-platform-version': '"19.0.0"',
-                    'sec-fetch-dest': 'empty',
-                    'sec-fetch-mode': 'cors',
-                })
+        self.session.headers.update(
+            {
+                "user-agent": user_agent,
+                "accept": "*/*",
+                "accept-language": "en-GB,en-US;q=0.9,en;q=0.8",
+                "cache-control": "no-cache",
+                "content-type": "application/x-www-form-urlencoded",
+                "origin": "https://web.facebook.com",
+                "pragma": "no-cache",
+                "priority": "u=1, i",
+                "sec-fetch-site": "same-origin",
+                # Below are optional to have
+                "referer": "https://web.facebook.com/",
+                "sec-ch-ua": '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
+                "sec-ch-ua-full-version-list": '"Chromium";v="152.0.7977.83", "Not?A_Brand";v="24.0.0.0", "Google Chrome";v="152.0.7977.83"',
+                "sec-ch-ua-mobile": "?0",
+                "sec-ch-ua-model": '""',
+                "sec-ch-ua-platform": '"Windows"',
+                "sec-ch-ua-platform-version": '"19.0.0"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+            }
+        )
 
         if proxy:
-            self.session.proxies.update({
-                "http": proxy,
-                "https": proxy,
-            })
+            self.session.proxies.update(
+                {
+                    "http": proxy,
+                    "https": proxy,
+                }
+            )
             self.session.verify = False
 
         self._cookies_file = cookies_file
         self._state_file = state_file
 
         # --- doc-id caches ---
-        self.operations = {}         # { operation_name: doc_id }
-        self.page_operations = {}    # { reference_page_url: { operation_name: doc_id } }
+        self.operations = {}  # { operation_name: doc_id }
+        self.page_operations = {}  # { reference_page_url: { operation_name: doc_id } }
 
         self.operation_discovery: FacebookOperationDiscovery= FacebookOperationDiscovery(self)
 
 
         # --- dtsg token (lazy, refreshed on demand) ---
-        self.fb_dtsg = None        
+        self.fb_dtsg = None
 
         self._load_cookies()
         self._load_state()
@@ -119,12 +130,10 @@ class FacebookContext:
             ) from e
 
         cookies = {
-            c["name"]: c["value"]
-            for c in raw_cookies
-            if "name" in c and "value" in c
+            c["name"]: c["value"] for c in raw_cookies if "name" in c and "value" in c
         }
         self.session.cookies.update(cookies)
-        
+
     def _load_state(self):
         """Attempt to load previously-saved state (operations + fb_dtsg)."""
         try:
@@ -142,7 +151,7 @@ class FacebookContext:
                 __version__,
             )
             return
-    
+
         self.operations = state.get("operations") or {}
         self.fb_dtsg = state.get("fb_dtsg")
 
@@ -179,7 +188,9 @@ class FacebookContext:
         if not isinstance(data, dict):
             return None
 
-        messages = [(err or {}).get("message", "") for err in (data.get("errors") or [])]
+        messages = [
+            (err or {}).get("message", "") for err in (data.get("errors") or [])
+        ]
 
         for msg in messages:
             if "missing_required_variable_value" in msg:
@@ -275,8 +286,8 @@ class FacebookContext:
         #         return doc_id
 
         # 3. discovery
-        self.progress(f"Discovering doc_id ...")
-        logger.info(f"Discovering doc_id for {operation_name} ...")
+        self.progress("Discovering doc_id ...")
+        logger.info("Discovering doc_id for %s ...", operation_name)
         discovered = self.operation_discovery.discover_operation(reference_page_url, operation_name)
 
         # fill both caches
@@ -303,7 +314,7 @@ class FacebookContext:
         """Re-read the cookies file into the current session."""
         self.session.cookies.clear()
         self._load_cookies()
-        
+
     def get(self, url):
         """
         GET a Facebook HTML page as a browser navigation.
@@ -322,9 +333,7 @@ class FacebookContext:
             },
         )
         if self._check_session_dead(response):
-            raise SessionExpiredError(
-                "Facebook Cookies are expired."
-            )
+            raise SessionExpiredError("Facebook Cookies are expired.")
         return response
 
     def post(self, operation_name, reference_page_url, variables, _retry=True):
@@ -334,29 +343,27 @@ class FacebookContext:
         Looks up the doc_id (from cache or discovery), sends the full variables
         dict, and self-heals on doc-id rotation or dtsg rejection.
         """
-                
+
         doc_id = self._resolve_doc_id(operation_name, reference_page_url)
         fb_dtsg = self._get_fb_dtsg()
 
-        self.progress(f"Sending FacebookGql Request ...")
-        logger.info(f"Sending FacebookGql Request ({operation_name})")
+        self.progress("Sending FacebookGql Request ...")
+        logger.info("Sending FacebookGql Request (%s)", operation_name)
 
         payload = {
             "doc_id": doc_id,
             "variables": json.dumps(variables),
             "fb_dtsg": fb_dtsg,
-            '__comet_req': 15,
-            '__a': 1,
+            "__comet_req": 15,
+            "__a": 1,
         }
 
         response = self.session.post(
             "https://web.facebook.com/api/graphql/", data=payload
         )
         if self._check_session_dead(response):
-            raise SessionExpiredError(
-                "Facebook Cookies are expired."
-            )
-        
+            raise SessionExpiredError("Facebook Cookies are expired.")
+
         if self.debug:
             self.debug_response(
                 operation_name,
@@ -377,7 +384,7 @@ class FacebookContext:
                 f"Check for a new update of facebook-gql-scraper, or open an issue: "
                 f"https://github.com/XD-MHLOO/facebook-gql-scraper/issues"
             )
-    
+
         # --- doc-id rotation ---
         if _retry and reason == "doc_id":
             self.progress("Facebook rotated the doc_id. Re-discovering ...")
@@ -411,13 +418,11 @@ class FacebookContext:
 
                 if self._is_dtsg_invalid(retry_response):
                     raise DtsgTokenStillInvalidError(
-                        f"still invalid after using a new fb_dstg token."
+                        "still invalid after using a new fb_dstg token."
                     )
                 return retry_response
-            else: 
-                raise DtsgTokenFetchError(
-                    f"Failed to refetch a new fb_dtsg token."
-                )
+            else:
+                raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
         return response
 
     def parse_graphql_response(self, raw):
@@ -442,7 +447,9 @@ class FacebookContext:
 
         os.makedirs(self.debug_dir, exist_ok=True)
 
-        filepath_raw = os.path.join(self.debug_dir, f"{operation_name}_{doc_id}_raw.txt")
+        filepath_raw = os.path.join(
+            self.debug_dir, f"{operation_name}_{doc_id}_raw.txt"
+        )
         with open(filepath_raw, "w", encoding="utf-8") as f:
             f.write(response.text)
 
@@ -465,7 +472,9 @@ class FacebookContext:
 
         consolidated_json = consolidate_jsonl(response.text)
 
-        filepath_consolidated = os.path.join(self.debug_dir, f"{operation_name}_{doc_id}_consolidated.json")
+        filepath_consolidated = os.path.join(
+            self.debug_dir, f"{operation_name}_{doc_id}_consolidated.json"
+        )
         with open(filepath_consolidated, "w", encoding="utf-8") as f:
             json.dump(consolidated_json, f, indent=2, ensure_ascii=False)
 
@@ -483,7 +492,9 @@ class FacebookContext:
             # ---- 5. Parse (only if consolidate succeeded) ----
             parsed = parse_facebook_payload(consolidated_json)
         else:
-            logger.warning(f"Failed to consolidate ({operation_name}); saving request/response only.")
+            logger.warning(
+                "Failed to consolidate (%s); saving request/response only.", operation_name
+            )
 
         debug_data = {
             "request": {
@@ -500,14 +511,17 @@ class FacebookContext:
                 "url": response.url,
                 "headers": dict(response.headers),
                 "parsed": parsed,
-            }
+            },
         }
 
-        filepath_parsed = os.path.join(self.debug_dir, f"{operation_name}_{doc_id}_parsed.json")
+        filepath_parsed = os.path.join(
+            self.debug_dir, f"{operation_name}_{doc_id}_parsed.json"
+        )
         with open(filepath_parsed, "w", encoding="utf-8") as f:
             json.dump(debug_data, f, indent=2, ensure_ascii=False)
 
         logger.info("GraphQL debug data saved: %s", filepath_parsed)
+
 
 class FacebookGraphQL:
     OPERATION_NAME: str = None
@@ -577,6 +591,7 @@ class ProfileCometHeaderQueryGraphQL(FacebookGraphQL):
     Profile header — basic profile info and the collection IDs used to
     navigate the user's profile tabs (About, Followers, Photos, Reels, etc.).
     """
+
     OPERATION_NAME = "ProfileCometHeaderQuery_facebookRelayOperation"
     REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano"
     VARIABLES = {
@@ -597,7 +612,9 @@ class ProfileCometHeaderQueryGraphQL(FacebookGraphQL):
 class ProfileCometAppCollectionListRendererPaginationQueryGraphQL(FacebookGraphQL):
     """Timeline app collection — followers, followees, friends, or photos, paginated."""
 
-    OPERATION_NAME = "ProfileCometAppCollectionListRendererPaginationQuery_facebookRelayOperation"
+    OPERATION_NAME = (
+        "ProfileCometAppCollectionListRendererPaginationQuery_facebookRelayOperation"
+    )
     REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/followers"
     VARIABLES = {
         "count": 8,
@@ -618,7 +635,9 @@ class ProfileCometAppCollectionListRendererPaginationQueryGraphQL(FacebookGraphQ
 class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraphQL):
     """Timeline app collection — reels with fuller video metadata, paginated."""
 
-    OPERATION_NAME = "ProfileCometAppCollectionReelsRendererPaginationQuery_facebookRelayOperation"
+    OPERATION_NAME = (
+        "ProfileCometAppCollectionReelsRendererPaginationQuery_facebookRelayOperation"
+    )
     REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/reels/"
     VARIABLES = {
         "count": 10,
@@ -654,7 +673,7 @@ class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraph
         variables["id"] = collectionId
         variables["cursor"] = cursor
         return super().send(variables)
-    
+
 
 class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
     """Profile timeline — the user's own posts, paginated."""
@@ -712,16 +731,25 @@ class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
     }
 
-    def send(self, userId: str, cursor: str = None,
-             afterTime: str = None, beforeTime: str = None):
+    def send(
+        self,
+        userId: str,
+        cursor: str = None,
+        afterTime: str = None,
+        beforeTime: str = None,
+    ):
         variables = dict(self.VARIABLES)
         variables["id"] = userId
         variables["cursor"] = cursor
         if afterTime is not None:
-            dt = datetime.strptime(afterTime, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(afterTime, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
             variables["afterTime"] = int(dt.timestamp())
         if beforeTime is not None:
-            dt = datetime.strptime(beforeTime, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+            dt = datetime.strptime(beforeTime, "%Y-%m-%d %H:%M:%S").replace(
+                tzinfo=timezone.utc
+            )
             variables["beforeTime"] = int(dt.timestamp())
         return super().send(variables)
 
@@ -772,15 +800,17 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__CometSinglePostDialogContent_isFloatingCTAEnabledrelayprovider": False,
     }
 
-    def send(self, postId: str, type="user_post", userId: str = "1"):
+    def send(self, postId: str, postType: Literal["user_post", "group_post"]= "user_post", userId: str = "1"):
         variables = dict(self.VARIABLES)
-        if type == "user_post":
-            storyID = f"S:_I{userId}:{postId}:{postId}"
+        if postType == "user_post":
+            story_id = f"S:_I{userId}:{postId}:{postId}"
             variables["referringStoryRenderLocation"] = "timeline"
-        elif type == "group_post":
-            storyID = f"S:_I{userId}:VK:{postId}"
+        elif postType == "group_post":
+            story_id = f"S:_I{userId}:VK:{postId}"
             variables["referringStoryRenderLocation"] = "group"
-        variables["storyID"] = base64.b64encode(storyID.encode()).decode()
+        else:
+            raise ValueError(f"Unknown post type: {postType!r}")
+        variables["storyID"] = base64.b64encode(story_id.encode()).decode()
         return super().send(variables)
 
 
@@ -839,10 +869,17 @@ class Depth1CommentsListPaginationQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
-    def send(self, postId: str, commentId: str, expansionToken: str,
-             repliesAfterCursor: str = None):
+    def send(
+        self,
+        postId: str,
+        commentId: str,
+        expansionToken: str,
+        repliesAfterCursor: str = None,
+    ):
         variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(f"feedback:{postId}_{commentId}".encode()).decode()
+        variables["id"] = base64.b64encode(
+            f"feedback:{postId}_{commentId}".encode()
+        ).decode()
         variables["expansionToken"] = expansionToken
         variables["focusCommentID"] = commentId
         if repliesAfterCursor is not None:
@@ -873,10 +910,17 @@ class Depth2CommentsListPaginationQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
-    def send(self, postId: str, commentId: str, expansionToken: str,
-             subRepliesAfterCursor: str = None):
+    def send(
+        self,
+        postId: str,
+        commentId: str,
+        expansionToken: str,
+        subRepliesAfterCursor: str = None,
+    ):
         variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(f"feedback:{postId}_{commentId}".encode()).decode()
+        variables["id"] = base64.b64encode(
+            f"feedback:{postId}_{commentId}".encode()
+        ).decode()
         variables["expansionToken"] = expansionToken
         if subRepliesAfterCursor is not None:
             variables["subRepliesAfterCount"] = -1
@@ -887,7 +931,9 @@ class Depth2CommentsListPaginationQueryGraphQL(FacebookGraphQL):
 class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
     """Post and comment reactors — list of users who reacted, paginated."""
 
-    OPERATION_NAME = "CometUFIReactionsDialogTabContentRefetchQuery_facebookRelayOperation"
+    OPERATION_NAME = (
+        "CometUFIReactionsDialogTabContentRefetchQuery_facebookRelayOperation"
+    )
     REFERENCE_PAGE_URL = "https://web.facebook.com/ufi/reaction/profile/browser/?ft_ent_identifier=1477237711067526"
     VARIABLES = {
         "count": 10,
@@ -898,11 +944,19 @@ class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
         "scale": 1,
     }
 
-    def send(self, postId: str, reactionID: str = None, cursor: str = None,
-             commentId: str = None, type="post"):
+    def send(
+        self,
+        postId: str,
+        reactionID: str = None,
+        cursor: str = None,
+        commentId: str = None,
+        itemType="post",
+    ):
         variables = dict(self.VARIABLES)
-        targetId = f"feedback:{postId}" if type == "post" else f"feedback:{postId}_{commentId}"
-        encoded = base64.b64encode(targetId.encode()).decode()
+        target_id = (
+            f"feedback:{postId}" if itemType == "post" else f"feedback:{postId}_{commentId}"
+        )
+        encoded = base64.b64encode(target_id.encode()).decode()
         variables["feedbackTargetID"] = encoded
         variables["id"] = encoded
         if reactionID is not None:
@@ -910,7 +964,8 @@ class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
         if cursor is not None:
             variables["cursor"] = cursor
         return super().send(variables)
-    
+
+
 class CometHovercardQueryRendererQueryGraphQL(FacebookGraphQL):
     """Profile or group hovercard — lightweight summary card."""
 
@@ -948,7 +1003,9 @@ class CometGroupAboutRootQueryGraphQL(FacebookGraphQL):
 class GroupsCometFeedRegularStoriesPaginationQueryGraphQL(FacebookGraphQL):
     """Group timeline — posts within a group, paginated."""
 
-    OPERATION_NAME = "GroupsCometFeedRegularStoriesPaginationQuery_facebookRelayOperation"
+    OPERATION_NAME = (
+        "GroupsCometFeedRegularStoriesPaginationQuery_facebookRelayOperation"
+    )
     REFERENCE_PAGE_URL = "https://www.facebook.com/groups/workingmemes"
     VARIABLES = {
         "count": 3,
@@ -1008,7 +1065,9 @@ class GroupsCometFeedRegularStoriesPaginationQueryGraphQL(FacebookGraphQL):
 class GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(FacebookGraphQL):
     """Group members — list of members, paginated."""
 
-    OPERATION_NAME = "GroupsCometMembersPageNewMembersSectionRefetchQuery_facebookRelayOperation"
+    OPERATION_NAME = (
+        "GroupsCometMembersPageNewMembersSectionRefetchQuery_facebookRelayOperation"
+    )
     REFERENCE_PAGE_URL = "https://www.facebook.com/groups/workingmemes/members"
     VARIABLES = {
         "count": 10,
@@ -1026,7 +1085,7 @@ class GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(FacebookGraphQL
         variables["cursor"] = cursor
         return super().send(variables)
 
-    
+
 class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
     """Facebook SERP — profiles, posts, and groups matching a search query, paginated."""
 
@@ -1095,8 +1154,13 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
     }
 
-    def send(self, text: str = "", filter_type: str = "all",
-             exact_match: bool = False, cursor: str = None):
+    def send(
+        self,
+        text: str = "",
+        filter_type: str = "all",
+        exact_match: bool = False,
+        cursor: str = None,
+    ):
         variables = dict(self.VARIABLES)
         exp_type = "GLOBAL_SEARCH"
         filters = []
@@ -1120,8 +1184,12 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
 class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
     """Marketplace search — listings matching a query, paginated."""
 
-    OPERATION_NAME = "CometMarketplaceSearchContentPaginationQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
+    OPERATION_NAME = (
+        "CometMarketplaceSearchContentPaginationQuery_facebookRelayOperation"
+    )
+    REFERENCE_PAGE_URL = (
+        "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
+    )
     VARIABLES = {
         "count": 24,
         "cursor": None,
@@ -1158,19 +1226,19 @@ class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
     }
 
     def send(
-            self,
-            query: str,
-            cursor: str = None,
-            is_stock_available: bool = True,
-            filter_location_latitude: float = 40.7128,
-            filter_location_longitude: float = -74.0060,
-            filter_price_lower_bound: int = 0,
-            filter_price_upper_bound: int = 2147483647,
-            filter_radius_km: int = 500,
-            item_condition: str = None,  # new, used_like_new, used_good, used_fair,
-            last_n_days: int = None,
-            sort_by: str = None,  # PRICE_DESCEND, PRICE_ASCEND, CREATION_TIME_DESCEND, DISTANCE_ASCEND
-            ):
+        self,
+        query: str,
+        cursor: str = None,
+        is_stock_available: bool = True,
+        filter_location_latitude: float = 40.7128,
+        filter_location_longitude: float = -74.0060,
+        filter_price_lower_bound: int = 0,
+        filter_price_upper_bound: int = 2147483647,
+        filter_radius_km: int = 500,
+        item_condition: str = None,  # new, used_like_new, used_good, used_fair,
+        last_n_days: int = None,
+        sort_by: str = None,  # PRICE_DESCEND, PRICE_ASCEND, CREATION_TIME_DESCEND, DISTANCE_ASCEND
+    ):
 
         commerce_search_and_rp_ctime_days = None
         if last_n_days:
@@ -1202,7 +1270,9 @@ class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
             },
         }
         if sort_by is not None:
-            variables["params"]["browse_request_params"]["commerce_search_sort_by"] = sort_by
+            variables["params"]["browse_request_params"]["commerce_search_sort_by"] = (
+                sort_by
+            )
 
         return super().send(variables)
 
@@ -1214,15 +1284,15 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
     REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometMarketplacePermalinkRoot.react"
     VARIABLES = {
         "enableJobEmployerActionBar": False,
-        "enableJobSeekerActionBar":   False,
-        "feedbackSource":             56,
-        "feedLocation":               "MARKETPLACE_MEGAMALL",
-        "referralCode":               "null",
-        "referralSurfaceString":      "search",
-        "scale":                      1,
-        "shouldFetchLoggedOutSimilarListings": False, 
-        "targetId":                   None,
-        "useDefaultActor":            False,
+        "enableJobSeekerActionBar": False,
+        "feedbackSource": 56,
+        "feedLocation": "MARKETPLACE_MEGAMALL",
+        "referralCode": "null",
+        "referralSurfaceString": "search",
+        "scale": 1,
+        "shouldFetchLoggedOutSimilarListings": False,
+        "targetId": None,
+        "useDefaultActor": False,
         "__relay_internal__pv__MarketplacePDPCometSimilarListingsrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPShouldShowRelatedSearchesrelayprovider": True,
         "__relay_internal__pv__MarketplacePDPShouldShowLoggedOutSellerTrustrelayprovider": False,
@@ -1244,7 +1314,7 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__MarketplacePDPShouldShowFAQrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPShouldShowRelatedCategoriesrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPShouldShowSupportFooterrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False
+        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False,
     }
 
     def send(self, marketListingId: str):
@@ -1256,13 +1326,15 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
 class MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL(FacebookGraphQL):
     """Marketplace PDP media — photos and videos for a listing."""
 
-    OPERATION_NAME = "MarketplacePDPC2CMediaViewerWithImagesQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
+    OPERATION_NAME = (
+        "MarketplacePDPC2CMediaViewerWithImagesQuery_facebookRelayOperation"
+    )
+    REFERENCE_PAGE_URL = (
+        "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
+    )
     VARIABLES = {"targetId": None}
 
     def send(self, marketListingId: str):
         variables = dict(self.VARIABLES)
         variables["targetId"] = marketListingId
         return super().send(variables)
-
-

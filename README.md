@@ -64,7 +64,7 @@ Export your Facebook session cookies as JSON and save them as
 import facebook_gql_scraper as fgs
 
 ctx = fgs.FacebookContext(cookies_file="facebook_cookies.json")
-user = fgs.Profile.from_id(ctx, id="100084254631043")
+user = fgs.Profile.from_user_id(ctx, user_id="100084254631043")
 # Or from username: user = fgs.Profile.from_username(ctx, username="Ishowspeed")
 print(user.name)
 ```
@@ -184,7 +184,7 @@ for friend in user.get_friends_followees():
 ## Post
 
 ```python
-post = fgs.Post.from_id(ctx, id="253053527513133")
+post = fgs.Post.from_post_id(ctx, post_id="253053527513133")
 # Or from PFBID: post = fgs.Post.from_pfbid(ctx, pfbid="pfbid0qHZRZohg13A1DmZpkFvHr3yuv7y1heFNnNoijtvi5onn1ctx2sjM5rRgTMSh6EGql")
 print(post.text)
 ```
@@ -272,8 +272,8 @@ for reactor in comment.get_reactors():
 ## Group
 
 ```python
-group = fgs.Group.from_id(ctx, id="2781022932139267")
-# Or from groupname: group = fgs.Group.from_id(ctx, groupname="workingmemes")
+group = fgs.Group.from_group_id(ctx, group_id="2781022932139267")
+# Or from groupname: group = fgs.Group.from_groupname(ctx, groupname="workingmemes")
 print(group.name)
 ```
 
@@ -309,7 +309,7 @@ for member in group.get_members():
 ## MarketplaceListing
 
 ```python
-listing = fgs.MarketplaceListing.from_id(ctx, id="123456789876789")
+listing = fgs.MarketplaceListing.from_listing_id(ctx, id="123456789876789")
 print(listing.product_details_type)
 ```
 A listing is one of two types, indicated by `product_details_type`:
