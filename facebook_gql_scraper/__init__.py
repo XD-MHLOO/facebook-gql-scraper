@@ -1,3 +1,10 @@
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("facebook-gql-scraper")
+except PackageNotFoundError:
+    __version__ = "unknown"
+    
 from .exceptions import *
 
 from .structures import (

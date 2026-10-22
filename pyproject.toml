@@ -1,6 +1,6 @@
 [project]
 name = "facebook-gql-scraper"
-version = "0.7.0"
+version = "0.7.1"
 description = "Scrape Facebook GraphQL data without an API key — profiles, posts, comments, reactions, groups, marketplace, search_engine."
 readme = "README.md"
 requires-python = ">=3.10"

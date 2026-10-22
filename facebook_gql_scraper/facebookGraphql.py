@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone, timedelta, date
 from typing import Optional
 
+from . import __version__
 from .facebookConsolidater import consolidate_jsonl
 from .unifiedFacebookParser import parse_facebook_payload
 from .exceptions import DocIdStillInvalidError, DtsgTokenStillInvalidError, DtsgTokenFetchError, SessionExpiredError, SchemaChangedError
@@ -134,6 +135,14 @@ class FacebookContext:
         except (json.JSONDecodeError, OSError):
             return
 
+        if state.get("version") != __version__:
+            logger.info(
+                "Discarding cached state: saved with version %r, current is %r",
+                state.get("version"),
+                __version__,
+            )
+            return
+    
         self.operations = state.get("operations") or {}
         self.fb_dtsg = state.get("fb_dtsg")
 
@@ -143,6 +152,7 @@ class FacebookContext:
         with open(self._state_file, "w", encoding="utf-8") as f:
             json.dump(
                 {
+                    "version": __version__,
                     "operations": self.operations,
                     # "page_operations": self.page_operations,
                     "fb_dtsg": self.fb_dtsg,
@@ -267,7 +277,7 @@ class FacebookContext:
         # 3. discovery
         self.progress(f"Discovering doc_id ...")
         logger.info(f"Discovering doc_id for {operation_name} ...")
-        discovered = self.operation_discovery.discover_operation(reference_page_url)
+        discovered = self.operation_discovery.discover_operation(reference_page_url, operation_name)
 
         # fill both caches
         self.page_operations[reference_page_url] = discovered
@@ -720,7 +730,7 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
     """Single post detail — full post content, comments, reactions."""
 
     OPERATION_NAME = "CometSinglePostDialogContentQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
     VARIABLES = {
         "feedbackSource": 2,
         "feedLocation": "POST_PERMALINK_DIALOG",
@@ -759,6 +769,7 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": False,
         "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
         "__relay_internal__pv__ProfileCometSeoIsViewerLoggedOutrelayprovider": False,
+        "__relay_internal__pv__CometSinglePostDialogContent_isFloatingCTAEnabledrelayprovider": False,
     }
 
     def send(self, postId: str, type="user_post", userId: str = "1"):
@@ -1032,7 +1043,7 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
                 "sts_disambiguation": None,
                 "watch_config": None,
             },
-            "context": {"bsid": "36caa52e-a9d7-4f56-805d-63bfd769ff60", "tsid": None},
+            "context": {"bsid": None, "tsid": None},
             "experience": {
                 "client_defined_experiences": ["ADS_PARALLEL_FETCH"],
                 "encoded_server_defined_params": None,
@@ -1200,7 +1211,7 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
     """Marketplace product details page — listing fields and seller context."""
 
     OPERATION_NAME = "MarketplacePDPContainerQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometMarketplacePermalinkRoot.react"
     VARIABLES = {
         "enableJobEmployerActionBar": False,
         "enableJobSeekerActionBar":   False,
@@ -1230,6 +1241,10 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__MarketplacePDPShouldShowBSGRecommendationsrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPJobShouldShowSharedGroupsSectionrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPJobIsShareToGroupsEnabledOnCometrelayprovider": False,
+        "__relay_internal__pv__MarketplacePDPShouldShowFAQrelayprovider": False,
+        "__relay_internal__pv__MarketplacePDPShouldShowRelatedCategoriesrelayprovider": False,
+        "__relay_internal__pv__MarketplacePDPShouldShowSupportFooterrelayprovider": False,
+        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False
     }
 
     def send(self, marketListingId: str):

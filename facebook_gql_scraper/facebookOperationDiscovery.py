@@ -107,15 +107,55 @@ class _ScriptParser(HTMLParser):
 
 
 class FacebookOperationDiscovery:
-    OPERATION_SUFFIX = "_facebookRelayOperation"
     BUNDLE_DELIMITER = ";/*FB_PKG_DELIM*/"
 
     def __init__(self, context):
         self.context = context
         self.timeout_sec = 30
 
+    def _find_rsrcmap(self, obj):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key == "rsrcMap" and isinstance(value, dict):
+                    return value
 
-    def discover_operation(self, page_url: str) -> dict[str, str]:
+                result = self._find_rsrcmap(value)
+                if result is not None:
+                    return result
+
+        elif isinstance(obj, list):
+            for item in obj:
+                result = self._find_rsrcmap(item)
+                if result is not None:
+                    return result
+
+        return None
+
+    def _get_javascript_links(self, text: str) -> list[str]:
+        text = text.lstrip()
+
+        if text.startswith("for (;;);"):
+            text = text[len("for (;;);"):].lstrip()
+
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+        rsrc_map = self._find_rsrcmap(data)
+
+        if not rsrc_map:
+            return []
+
+        return list(dict.fromkeys(
+            item["src"]
+            for item in rsrc_map.values()
+            if isinstance(item, dict)
+            and item.get("type") == "js"
+            and isinstance(item.get("src"), str)
+    ))
+
+    def discover_operation(self, page_url: str, operation_name: str,) -> dict[str, str]:
         """
         Fetch the page and its external scripts through FacebookContext.
         """
@@ -123,12 +163,19 @@ class FacebookOperationDiscovery:
         response = self.context.get(page_url)
         response.raise_for_status()
 
-        parser = _ScriptParser()
-        parser.feed(response.text)
 
-        script_urls = list(dict.fromkeys(
-            urljoin(page_url, src) for src in parser.urls
-        ))
+        # Try the bootloader JSON response first.
+        script_urls = self._get_javascript_links(response.text)
+
+
+        # If no rsrcMap links were found, treat the response as HTML.
+        if not script_urls:
+            parser = _ScriptParser()
+            parser.feed(response.text)
+
+            script_urls = list(dict.fromkeys(
+                urljoin(page_url, src) for src in parser.urls
+            ))
 
         v8 = MiniRacer()
         v8.eval(_RUNTIME)
@@ -146,6 +193,10 @@ class FacebookOperationDiscovery:
                 if source.strip():
                     v8.eval(source, timeout_sec=self.timeout_sec)
 
+                # Check whether the target operation is registered and resolvable.
+                if self._has_operation(v8, operation_name):
+                    break
+                
             except Exception:
                 logger.warning(
                     "Could not evaluate Facebook script %s",
@@ -154,6 +205,21 @@ class FacebookOperationDiscovery:
                 )
 
         return self._collect(v8)
+
+    def _has_operation(self, v8, operation_name: str) -> bool:
+        return bool(v8.call(
+            """function(name) {
+                if (!__registry[name]) return false;
+
+                try {
+                    var value = require(name);
+                    return typeof value === "string" && value.length > 0;
+                } catch (e) {
+                    return false;
+                }
+            }""",
+            operation_name,
+        ))
 
     def _prepare_bundle(self, source: str) -> str:
         marker = self.BUNDLE_DELIMITER

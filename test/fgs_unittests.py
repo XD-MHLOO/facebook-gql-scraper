@@ -1,3 +1,10 @@
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+
 import unittest
 import facebook_gql_scraper as fgs
 
@@ -31,9 +38,8 @@ MAX_MARKETPLACE_RESULTS = 10
 
 class TestFacebook(unittest.TestCase):
 
-    @classmethod
-    def setUpClass(cls):
-        cls.fbContext = fgs.FacebookContext()
+    def setUp(self):
+        self.fbContext = fgs.FacebookContext(debug=True)
 
     # ========================================================
     # Profile
