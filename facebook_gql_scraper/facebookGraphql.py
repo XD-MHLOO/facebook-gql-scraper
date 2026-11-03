@@ -827,7 +827,7 @@ class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
         "commentsAfterCursor": None,
         "commentsBeforeCount": None,
         "commentsBeforeCursor": None,
-        "commentsIntentToken": None,
+        "commentsIntentToken": "REVERSE_CHRONOLOGICAL_UNFILTERED_INTENT_V1",
         "feedLocation": "POST_PERMALINK_DIALOG",
         "focusCommentID": None,
         "id": None,
