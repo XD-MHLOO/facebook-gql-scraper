@@ -405,24 +405,27 @@ class FacebookContext:
 
         # --- dtsg rejection ---
         if _retry and self._is_dtsg_invalid(response):
+            self.fb_dtsg = None
             self.progress("Refreshing fb_dtsg token ...")
             logger.info("Facebook rejected fb_dtsg, refreshing from error response")
 
-            if self._refresh_dtsg_from_response(response):
-                retry_response = self.post(
-                    operation_name,
-                    reference_page_url,
-                    variables,
-                    _retry=False,
-                )
-
-                if self._is_dtsg_invalid(retry_response):
-                    raise DtsgTokenStillInvalidError(
-                        "still invalid after using a new fb_dstg token."
-                    )
-                return retry_response
-            else:
+            refreshed = self._refresh_dtsg_from_response(response)
+            if not refreshed and self._get_fb_dtsg() is None:
                 raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
+            
+            retry_response = self.post(
+                operation_name,
+                reference_page_url,
+                variables,
+                _retry=False,
+            )
+
+            if self._is_dtsg_invalid(retry_response):
+                raise DtsgTokenStillInvalidError(
+                    "still invalid after using a new fb_dstg token."
+                )
+            return retry_response
+            
         return response
 
     def parse_graphql_response(self, raw):
