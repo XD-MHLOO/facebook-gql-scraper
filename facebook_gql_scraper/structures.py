@@ -1,6 +1,6 @@
 from typing import NamedTuple, Optional, Iterator, TypeVar, Literal, overload
 import re
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urlparse, urlsplit, urlunsplit
 
 
 from .facebookGraphql import (
@@ -1976,7 +1976,10 @@ class Profile(FacebookModel):
         res = context.get(f"https://web.facebook.com/{username}")
         match = re.search(r'"userID"\s*:\s*"(\d+)"', res.text)
         user_id = match.group(1) if match else None
-        if user_id:
+
+        res_username = urlparse(res.url).path.rstrip("/").split("/")[-1] or None
+
+        if username == res_username and user_id:
             return cls.from_user_id(context, user_id)
 
         raise ProfileNotFoundError(f"No profile found for username: {username}")
