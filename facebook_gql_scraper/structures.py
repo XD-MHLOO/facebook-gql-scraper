@@ -1,8 +1,9 @@
-from typing import NamedTuple, Optional, Iterator, TypeVar, Literal, overload
+from typing import NamedTuple, Optional, Iterator, TypeVar, Literal, overload, Generic
+
 import re
 from urllib.parse import urlparse, urlsplit, urlunsplit
 
-
+from facebook_gql_scraper.parserModels import *
 from .facebookGraphql import (
     FacebookContext,
     ProfileCometAboutAppSectionQueryGraphQL,
@@ -23,6 +24,9 @@ from .facebookGraphql import (
     CometMarketplaceSearchContentPaginationQueryGraphQL,
     MarketplacePDPContainerQueryGraphQL,
     MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL,
+    CometPhotoRootContentQueryGraphQL,
+    GroupsCometMediaPhotosTabGridQueryGraphQL,
+    GroupsCometMediaVideosTabGridQueryGraphQL
 )
 from .exceptions import (
     FollowersNotAvailableException,
@@ -34,8 +38,10 @@ from .exceptions import (
     MissingParentError,
     ProfileNotFoundError,
     PostNotFoundError,
+    MediaPostNotFoundError,
     GroupNotFoundError,
     MarketplaceListingNotFoundError,
+    InvalidIdTypeError,
 )
 
 
@@ -47,13 +53,10 @@ class Photo(NamedTuple):
     :vartype id: str or None
     :ivar image_url: Direct URL of the photo image.
     :vartype image_url: str or None
-    :ivar url: Facebook URL of the photo.
-    :vartype url: str or None
     """
 
     id: Optional[str] = None
     image_url: Optional[str] = None
-    url: Optional[str] = None
 
 
 class Video(NamedTuple):
@@ -63,49 +66,53 @@ class Video(NamedTuple):
     :ivar id: Unique identifier of the video.
     :vartype id: str or None
     :ivar length_in_second: Duration of the video in seconds.
-    :vartype length_in_second: int or None
-    :ivar created_time: Creation timestamp of the video.
-    :vartype created_time: int or None
+    :vartype length_in_second: float or None
+    :ivar creation_time: Creation timestamp of the video.
+    :vartype creation_time: int or None
     :ivar thumbnail_image_url: URL of the video's thumbnail image.
     :vartype thumbnail_image_url: str or None
     :ivar video_url: Direct URL of the video.
     :vartype video_url: str or None
-    :ivar url: Facebook URL of the video.
-    :vartype url: str or None
     :ivar play_count: Number of times the video has been played.
-    :vartype play_count: int or None
+    :vartype play_count: str or None
     :ivar fallback_image_url: Fallback image URL for the video.
     :vartype fallback_image_url: str or None
     """
 
     id: Optional[str] = None
-    length_in_second: Optional[int] = None
-    created_time: Optional[int] = None
+    length_in_second: Optional[float] = None
+    creation_time: Optional[int] = None
     thumbnail_image_url: Optional[str] = None
     video_url: Optional[str] = None
-    url: Optional[str] = None
-    play_count: Optional[int] = None
+    play_count: Optional[str] = None
     fallback_image_url: Optional[str] = None
 
-
-class GenericMedia(NamedTuple):
+class AnimatedImage(NamedTuple):
     """
-    Generic Facebook media attachment.
+    Animated image (GIF) attachment.
 
-    :ivar id: Unique identifier of the media object.
-    :vartype id: str or None
-    :ivar image_url: URL of the media image.
+    :ivar image_url: URL of the preview image.
     :vartype image_url: str or None
-    :ivar genericMedia_url: URL associated with the generic media.
+    :ivar genericMedia_url: URL of the animated image.
     :vartype genericMedia_url: str or None
-    :ivar animated_image_attribution: Attribution information for animated media.
+    :ivar animated_image_attribution: Attribution for the animated image.
     :vartype animated_image_attribution: str or None
     """
-
     id: Optional[str] = None
     image_url: Optional[str] = None
     genericMedia_url: Optional[str] = None
     animated_image_attribution: Optional[str] = None
+
+
+class ExternalLink(NamedTuple):
+    """
+    External link attachment.
+
+    :ivar web_link: Target URL of the shared link.
+    :vartype web_link: str or None
+    """
+    id: Optional[str] = None
+    web_link: Optional[str] = None
 
 
 class Sticker(NamedTuple):
@@ -224,90 +231,36 @@ class PartnerSeller(NamedTuple):
     average_ship_time: Optional[str] = None
 
 
-def safe_get(data, *keys, default=None):
-    """Walk nested dicts/lists. Return default if anything is missing."""
-    for key in keys:
-        try:
-            if isinstance(data, dict):
-                data = data[key]
-            elif isinstance(data, list):
-                data = data[key]
-            else:
-                return default
-        except (KeyError, IndexError, TypeError):
-            return default
-    if data is None:
-        return default
 
-    return data
-
-
-def _attachment_to_dict(attachment: dict) -> Optional[dict]:
-    """
-    Convert a dict attachment into its normalized dictionary representation based on its type.
-    """
-
-    t = attachment.get("type")
-    if t == "photo":
-        return {
-            "type": "photo",
-            "id": attachment.get("id"),
-            "image_url": attachment.get("image_url"),
-            "url": attachment.get("url"),
-        }
-    elif t == "video":
-        return {
-            "type": "video",
-            "id": attachment.get("id"),
-            "length_in_second": attachment.get("length_in_second"),
-            "thumbnail_image_url": attachment.get("thumbnail_image_url"),
-            "fallback_image_url": attachment.get("fallback_image_url"),
-            "video_url": attachment.get("video_url"),
-            "url": attachment.get("url"),
-        }
-    elif t == "genericMedia":
-        return {
-            "type": "genericMedia",
-            "id": attachment.get("id"),
-            "image_url": attachment.get("image_url"),
-            "genericMedia_url": attachment.get("genericMedia_url"),
-            "animated_image_attribution": attachment.get("animated_image_attribution"),
-        }
-    elif t == "sticker":
-        return {
-            "type": "sticker",
-            "id": attachment.get("id"),
-            "label": attachment.get("label"),
-            "image_url": attachment.get("image_url"),
-        }
-
-
-def _dict_to_attachment(att: dict) -> Optional[Photo | Video | GenericMedia | Sticker]:
+def _dict_to_attachment(att: dict) -> Optional[Photo | Video | AnimatedImage| ExternalLink | Sticker]:
     """Convert a raw attachment dict into a typed NamedTuple, or None for unknown types."""
     t = att.get("type")
     if t == "photo":
         return Photo(
             id=att.get("id"),
             image_url=att.get("image_url"),
-            url=att.get("url"),
         )
     elif t == "video":
         return Video(
             id=att.get("id"),
             length_in_second=att.get("length_in_second"),
-            created_time=att.get("created_time"),
+            creation_time=att.get("creation_time"),
             thumbnail_image_url=att.get("thumbnail_image_url"),
             video_url=att.get("video_url"),
-            url=att.get("url"),
             play_count=att.get("play_count"),
             fallback_image_url=att.get("fallback_image_url"),
         )
-    elif t == "genericMedia":
-        return GenericMedia(
+    elif t == "genericMediaAnimatedImage":
+        return AnimatedImage(
             id=att.get("id"),
             image_url=att.get("image_url"),
             genericMedia_url=att.get("genericMedia_url"),
             animated_image_attribution=att.get("animated_image_attribution"),
+        )
+    elif t == "genericMediaExtLink":
+        return ExternalLink(
+            id=att.get("id"),
+            web_link=att.get("web_link"),
         )
     elif t == "sticker":
         return Sticker(
@@ -387,6 +340,7 @@ class PaginatedIterator(Iterator[T]):
         self._iterator_type = iterator_type
         self._query_variables = query_variables or {}
 
+        self._started = False
         self._raw_buffer = []
         self._cursor = None
         self._exhausted = False
@@ -402,6 +356,7 @@ class PaginatedIterator(Iterator[T]):
         A new page is requested automatically when the current page has
         been exhausted.
         """
+        self._started = True
         while not self._raw_buffer:
             if self._exhausted:
                 raise StopIteration
@@ -444,6 +399,7 @@ class PaginatedIterator(Iterator[T]):
         return iterator
 
     def freeze(self) -> FrozenPaginatedIterator:
+        """Serialize the iterator's current state for later resumption."""
         return FrozenPaginatedIterator(
             iterator_type=self._iterator_type,
             query_variables=self._query_variables,
@@ -453,7 +409,8 @@ class PaginatedIterator(Iterator[T]):
         )
 
     def thaw(self, frozen: FrozenPaginatedIterator) -> None:
-        if self._raw_buffer or self._cursor is not None:
+        """Restore state from a :class:`FrozenPaginatedIterator` and continue iteration."""
+        if self._started:
             raise ValueError("thaw() called on already-used iterator.")
         if (
             self._iterator_type != frozen.iterator_type
@@ -540,22 +497,15 @@ class FacebookModel:
         except (KeyError, TypeError, IndexError):
             return default
 
-
-class Post(FacebookModel):
+class PostBase(FacebookModel):
     """
-    Facebook post.
+    Base for Facebook posts.
 
-    A :class:`Post` object is normally created by methods such as
-    :meth:`Profile.get_posts` or :meth:`Group.get_posts`.
+    Provides the feedback-related API shared by :class:`Post` and
+    :class:`MediaPost`.
 
-    Post objects may initially contain only partial information. Additional
-    metadata is fetched automatically when a requested field is not available.
-
-    :param context: :class:`FacebookContext` used for additional GraphQL
-        requests when more information is required.
-    :param data: Dictionary containing the initial post data.
-    :param owner: The :class:`Profile` that owns the post, if already known.
-    :param group: The :class:`Group` containing the post, if applicable.
+    :param context: :class:`FacebookContext` used for GraphQL requests.
+    :param data: Initial post data.
     """
 
     def __init__(
@@ -566,76 +516,27 @@ class Post(FacebookModel):
         group: "Group" = None,
     ):
         super().__init__(context, data)
-        assert "id" in self._data, "Post requires id"
+        assert "id" in self._data, "PostBase requires id"
         self._full_fetched = False
         self._owner = owner
         self._group = group
 
     @property
     def _identity(self) -> str:
-        """
-        Return the post's unique identifier.
-
-        :return: Facebook post ID.
-        :rtype: str
-        """
         return self._field("id")
 
     def _obtain_metadata(self):
-        """
-        Fetch complete post metadata from Facebook.
+        """Implemented by subclasses — fetch full metadata."""
+        raise NotImplementedError
 
-        """
-        if self._full_fetched:
-            return
-
-        post_graphql = CometSinglePostDialogContentQueryGraphQL(self._context)
-        response_post_graphql = post_graphql.send(postId=self.id)
-        parsed = self._context.parse_graphql_response(response_post_graphql.text)
-
-        if parsed["parsed_data"] is None:
-            raise PostNotFoundError(f"Post not found: {self.id}")
-
-        post_data = {
-            "id": parsed["parsed_data"]["post"]["id"],
-            "creation_time": parsed["parsed_data"]["post"]["creation_time"],
-            "url": parsed["parsed_data"]["post"]["url"],
-            "author": {
-                "id": parsed["parsed_data"]["post"]["author"]["id"],
-                "name": parsed["parsed_data"]["post"]["author"]["name"],
-                "url": parsed["parsed_data"]["post"]["author"]["url"],
-                "profile_picture_url": parsed["parsed_data"]["post"]["author"]["profile_picture_url"],
-            },
-            "title": parsed["parsed_data"]["post"]["title"],
-            "text": parsed["parsed_data"]["post"]["text"],
-            "attachments": [
-                _attachment_to_dict(a)
-                for a in parsed["parsed_data"]["post"]["attachments"]
-            ],
-            "reactors_visible": parsed["parsed_data"]["post"]["reactors_visible"],
-            "reactions": {
-                "total": parsed["parsed_data"]["post"]["reactions"]["total"],
-                "breakdown": [
-                    {
-                        "id": entry["id"],
-                        "name": entry["name"],
-                        "count": entry["count"],
-                    }
-                    for entry in parsed["parsed_data"]["post"]["reactions"]["breakdown"]
-                ],
-            },
-            "share_count": parsed["parsed_data"]["post"]["share_count"],
-            "comments_count": parsed["parsed_data"]["post"]["comments_count"],
-        }
-        self._data.update(post_data)
-        self._full_fetched = True
+    # ---------- identity ----------
 
     @property
     def id(self) -> str:
         """
         Unique identifier of the post.
 
-        :return: The Facebook post ID.
+        :return: Facebook post ID.
         :rtype: str
         """
         return self._field("id")
@@ -643,9 +544,9 @@ class Post(FacebookModel):
     @property
     def creation_time(self) -> Optional[int]:
         """
-        Unix timestamp representing when the post was created.
+        Unix timestamp when the post was created.
 
-        :return: Post creation timestamp.
+        :return: Creation timestamp, or ``None`` when unavailable.
         :rtype: int or None
         """
         return self._field("creation_time")
@@ -653,217 +554,76 @@ class Post(FacebookModel):
     @property
     def url(self) -> Optional[str]:
         """
-        Facebook URL of the post.
+        Canonical Facebook URL of the post.
 
-        :return: URL of the post.
+        :return: Post URL, or ``None`` when unavailable.
         :rtype: str or None
         """
         return self._field("url")
-
-    @property
-    def title(self) -> Optional[str]:
-        """
-        Title of the post.
-
-        :return: Post title.
-        :rtype: str or None
-        """
-        return self._field("title")
 
     @property
     def text(self) -> Optional[str]:
         """
         Text content of the post.
 
-        :return: Post text.
+        :return: Post text, or ``None`` when the post has no text.
         :rtype: str or None
         """
         return self._field("text")
 
-    # ---------- reactions ----------
+    # ---------- reactions / counts ----------
 
     @property
-    def reaction_count(self) -> Optional[str]:
+    def reaction_count(self) -> Optional[int]:
         """
-        Return the total number of reactions on the post.
+        Total number of reactions on the post.
 
-        :return: Number of reactions.
-        :rtype: str
+        :return: Reaction count, or ``None`` when unavailable.
+        :rtype: int or None
         """
-        return self._field(("reactions", "total"))
+        return self._field("reaction_count")
 
     @property
     def reactors_visible(self) -> Optional[bool]:
         """
-        Return whether the reactors are visible.
+        Whether the list of reactors is visible to the viewer.
 
-        :return: True if the reactors are visible, otherwise False.
-        :rtype: bool
+        :return: ``True`` when reactors can be listed, ``False`` when hidden,
+            or ``None`` when the information is unavailable.
+        :rtype: bool or None
         """
-        return self._field(("reactors_visible"))
-
-    @property
-    def top_reaction_breakdown(self) -> Optional[list]:
-        """
-        Return the top reaction count broken down by reaction type.
-
-        :return: List containing reaction type information and counts.
-        :rtype: list
-        """
-        return self._field(("reactions", "breakdown"))
-
-    # ---------- counts ----------
-
-    @property
-    def share_count(self) -> Optional[int]:
-        """
-        Return the number of times the post has been shared.
-
-        :return: Share count.
-        :rtype: int
-        """
-        return self._field("share_count")
+        return self._field("reactors_visible")
 
     @property
     def comments_count(self) -> Optional[int]:
         """
-        Return the number of comments on the post.
+        Total number of comments on the post.
 
-        :return: Comment count.
-        :rtype: int
+        :return: Comment count, or ``None`` when unavailable.
+        :rtype: int or None
         """
         return self._field("comments_count")
 
-    def get_comments(self) -> PaginatedIterator["Comment"]:
-        """
-        Iterate over all comments of the post.
-
-        Comments are fetched lazily from Facebook using the GraphQL API.
-
-        :return: Iterator yielding :class:`Comment` objects.
-        :rtype: PaginatedIterator
-        """
-        comments_graphql = CommentsListComponentsPaginationQueryGraphQL(self._context)
-
-        def request_fn(cursor):
-            return comments_graphql.send(
-                postId=self._field("id"),
-                commentsAfterCursor=cursor,
-            ).text
-
-        def page_wrapper(parsed):
-            raw_items = [
-                {
-                    "id": item["id"],
-                    "text": item["text"],
-                    "attachments": [
-                        _attachment_to_dict(att) for att in item["attachments"]
-                    ],
-                    "created_time": item["created_time"],
-                    "reaction_count": item["reaction_count"],
-                    "reply_count": item["reply_count"],
-                    "reply_expansion_token": item["reply_expansion_token"],
-                    "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "gender": item["author"]["gender"],
-                        "url": item["author"]["url"],
-                        "profile_picture_url": item["author"]["profile_picture_url"],
-                    },
-                }
-                for item in parsed["parsed_data"]["comments"]
-            ]
-            page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
-            }
-            return raw_items, page_info
-
-        def item_wrapper(raw):
-            return Comment(self._context, raw, post=self)
-
-        return PaginatedIterator(
-            request_fn=request_fn,
-            parser=self._context.parse_graphql_response,
-            page_wrapper=page_wrapper,
-            item_wrapper=item_wrapper,
-            iterator_type="comments",
-            query_variables={"postId": self.id},
-        )
-
-    def get_reactors(self) -> PaginatedIterator[Reactor]:
-        """
-        Iterate over users who reacted to the post.
-
-        :return: Iterator yielding :class:`Reactor` objects.
-        :rtype: PaginatedIterator
-        """
-        reactors_graphql = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(
-            self._context
-        )
-
-        def request_fn(cursor):
-            return reactors_graphql.send(
-                postId=self._field("id"),
-                reactionID=None,
-                itemType="post",
-                cursor=cursor,
-            ).text
-
-        def page_wrapper(parsed):
-            raw_items = [
-                {
-                    "reaction_type_id": item["reaction_type_id"],
-                    "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "url": item["author"]["url"],
-                        "profile_picture_url": item["author"]["profile_picture_url"],
-                    },
-                }
-                for item in parsed["parsed_data"]["reactors"]
-            ]
-            page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
-            }
-            return raw_items, page_info
-
-        def item_wrapper(raw):
-            return Reactor(
-                reaction_type_id=raw["reaction_type_id"],
-                profile=Profile(self._context, raw["author"]),
-            )
-
-        return PaginatedIterator(
-            request_fn=request_fn,
-            parser=self._context.parse_graphql_response,
-            page_wrapper=page_wrapper,
-            item_wrapper=item_wrapper,
-            iterator_type="reactors",
-            query_variables={"postId": self.id, "type": "post"},
-        )
-
     @property
-    def attachments(self) -> Optional[list[Photo | Video | GenericMedia | Sticker]]:
+    def share_count(self) -> Optional[int]:
         """
-        Return the post's media attachments as typed objects.
+        Total number of times the post has been shared.
 
-        Unknown attachment types are ignored.
-
-        :return: List of :class:`Photo`, :class:`Video`,
-            :class:`GenericMedia`, and :class:`Sticker` objects.
-        :rtype: list
+        :return: Share count, or ``None`` when unavailable.
+        :rtype: int or None
         """
-        if self._field("attachments") is None:
-            return None
+        return self._field("share_count")
 
-        result = []
-        for att in self._field("attachments", default=[]):
-            converted = _dict_to_attachment(att)
-            if converted is not None:
-                result.append(converted)
-        return result
+    # ---------- shared paginated endpoints ----------
+
+    def _feedback_id(self) -> list[str]:
+        """
+        Return the feedback ID parts: ``[parent_post_id, media_post_id]`` when a
+        parent post exists, otherwise ``[media_post_id]``.
+        """
+        return [self._field("id")]
+
+    # ---------- parents ----------
 
     @property
     def owner(self) -> Optional["Profile"]:
@@ -903,8 +663,404 @@ class Post(FacebookModel):
             with a known group.
         :rtype: Group or None
         """
-        return self._group
+        if self._group:
+            return self._group
 
+        if self._field("group_id", None) is not None:
+            group_id = self._field("group_id")
+
+            return Group(
+                self._context,
+                {
+                    "id": group_id,
+                },
+            )
+
+        return None
+
+    @classmethod
+    def from_any_id(cls, context: FacebookContext, any_post_id: str) -> "Post | MediaPost":
+        """
+        Resolve a post or media post by id.
+
+        Tries :meth:`Post.from_post_id` first; on :class:`InvalidIdTypeError`
+        retries with :meth:`MediaPost.from_media_post_id`. Returns whichever
+        matched.
+
+        :param context: Facebook context used to fetch the entity.
+        :type context: FacebookContext
+        :param any_post_id: Facebook numeric id (post or media post).
+        :type any_post_id: str
+        :return: A :class:`Post` or :class:`MediaPost`.
+        :rtype: PostBase
+        """
+        try:
+            return Post.from_post_id(context, any_post_id)
+        except InvalidIdTypeError:
+            return MediaPost.from_media_post_id(context, any_post_id)
+        
+    def get_comments(self) -> PaginatedIterator["Comment"]:
+        """
+        Iterate over comments on this post.
+
+        :return: Iterator yielding :class:`Comment` objects.
+        :rtype: PaginatedIterator[Comment]
+        """
+        comments_graphql = CommentsListComponentsPaginationQueryGraphQL(self._context)
+        feedback_parts = self._feedback_id()
+
+        def request_fn(cursor):
+            return comments_graphql.send(
+                feedbackParts=feedback_parts,
+                commentsAfterCursor=cursor,
+            ).text
+
+        def page_wrapper(parsed):
+            page: ParserCommentsPage = parsed.parsed_data
+            raw_items = [c.model_dump(exclude_none=True) for c in page.comments]
+
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw):
+            return Comment(self._context, raw, post=self)
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="comments",
+            query_variables={"postId": self.id},
+        )
+
+    def get_reactors(self) -> PaginatedIterator["Reactor"]:
+        """
+        Iterate over users who reacted to this post.
+
+        :return: Iterator yielding :class:`Reactor` objects.
+        :rtype: PaginatedIterator[Reactor]
+        """
+        reactors_graphql = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(self._context)
+
+        def request_fn(cursor):
+            return reactors_graphql.send(
+                postId=self._field("id"),
+                reactionID=None,
+                itemType="post",
+                cursor=cursor,
+            ).text
+
+        def page_wrapper(parsed):
+            page: ParserReactorsPage = parsed.parsed_data
+            raw_items = [r.model_dump(exclude_none=True) for r in page.reactors]
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw):
+            return Reactor(
+                reaction_type_id=raw["reaction_type_id"],
+                profile=Profile(self._context, raw["author"]),
+            )
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="reactors",
+            query_variables={"postId": self.id, "type": "post"},
+        )
+    
+M = TypeVar("M", Photo, Video)
+
+class MediaPost(PostBase, Generic[M]):
+    """
+    A post that wraps exactly one media object (photo or video).
+
+    On Facebook, each image / video in an album is its own post with its
+    own comment section and reactions. :class:`MediaPost` represents that
+    child post.
+
+    :param context: :class:`FacebookContext` used for GraphQL requests.
+    :param data: Initial media post data.
+    :param owner: The :class:`Profile` that owns the media post, if known.
+    """
+
+    def __init__(
+        self,
+        context: FacebookContext,
+        data: dict,
+        owner: "Profile" = None,
+        group: "Group" = None,
+        post: "Post" = None, 
+    ):
+        super().__init__(context, data, owner, group)
+        self._post = post
+
+
+    def _obtain_metadata(self):
+        
+        if self._full_fetched:
+            return
+
+        media_post_graphql = CometPhotoRootContentQueryGraphQL(self._context)
+        response_media_post_graphql = media_post_graphql.send(mediaPostId=self.id)
+        parsed = self._context.parse_graphql_response(response_media_post_graphql.text)
+
+        if parsed is None or parsed.parsed_data is None:
+            raise MediaPostNotFoundError(f"Media Post not found: {self.id}")
+
+        media_post: ParserMediaPost = parsed.parsed_data
+
+        self._data.update(media_post.model_dump(exclude_none=True))
+        
+        self._full_fetched = True
+
+    def _feedback_id(self) -> list[str]:
+        parts: list[str] = []
+        parent = self._field("parent_post_id")
+        if parent and self.post.media_posts_count == 1:
+            return[parent]
+        else: 
+            return [self._field("id")]
+        # if parent:
+        #     parts.append(parent)
+        # parts.append(self._field("id"))
+        # return parts
+    
+    # ---------- media ----------
+
+    @property
+    def media(self) -> Optional[M]:
+        data = self._field("media")
+        if data is None:
+            return None
+        t = data.get("type")
+        if t == "photo":
+            return Photo(
+                id=data.get("id"),
+                image_url=data.get("image_url"),
+            )
+        if t == "video":
+            return Video(
+                id=data.get("id"),
+                length_in_second=data.get("length_in_second"),
+                creation_time=data.get("creation_time"),
+                thumbnail_image_url=data.get("thumbnail_image_url"),
+                video_url=data.get("video_url"),
+                play_count=data.get("play_count"),
+                fallback_image_url=data.get("fallback_image_url"),
+            )
+        if t == "sticker":
+            return Sticker(
+                id=data.get("id"),
+                label=data.get("label"),
+                image_url=data.get("image_url"),
+            )
+        return None
+
+    @classmethod
+    def from_media_post_id(
+        cls,
+        context: FacebookContext,
+        media_post_id: str,
+    ) -> "MediaPost":
+        """
+        Create a media post from its Facebook ID.
+
+        Example::
+
+            mp = MediaPost.from_media_post_id(ctx, "1104956379211700")
+
+        :param context: Facebook context used to fetch the media post.
+        :type context: FacebookContext
+        :param media_post_id: Facebook media post identifier.
+        :type media_post_id: str
+        :return: Media post with metadata fetched.
+        :rtype: MediaPost
+        :raises MediaPostNotFoundError: If no matching media post is found.
+        """
+        media_post = cls(context, {"id": media_post_id})
+        media_post._obtain_metadata()
+        return media_post
+
+    @property
+    def post(self) -> Optional["Post"]:
+        """
+        Return the parent post that contains this media post, if known.
+
+        :return: Parent :class:`Post`, or ``None`` when the media post is standalone.
+        :rtype: Post or None
+        """
+        if self._post is not None:
+            return self._post
+        pid = self._field("parent_post_id")
+        if pid is None:
+            return None
+        return Post(self._context, {"id": pid})
+    
+class Post(PostBase):
+    """
+    Facebook post.
+
+    A :class:`Post` object is normally created by methods such as
+    :meth:`Profile.get_posts` or :meth:`Group.get_posts`.
+
+    :param context: :class:`FacebookContext` used for additional GraphQL
+        requests when more information is required.
+    :param data: Dictionary containing the initial post data.
+    :param owner: The :class:`Profile` that owns the post, if already known.
+    :param group: The :class:`Group` containing the post, if applicable.
+    """
+
+    def __init__(
+        self,
+        context: FacebookContext,
+        data: dict,
+        owner: "Profile" = None,
+        group: "Group" = None,
+    ):
+        super().__init__(context, data, owner, group)
+
+
+    def _obtain_metadata(self):
+        """
+        Fetch complete post metadata from Facebook.
+
+        """
+        if self._full_fetched:
+            return
+
+        post_graphql = CometSinglePostDialogContentQueryGraphQL(self._context)
+        response_post_graphql = post_graphql.send(postId=self.id)
+        parsed = self._context.parse_graphql_response(response_post_graphql.text)
+
+        if parsed is None or parsed.parsed_data is None:
+            raise PostNotFoundError(f"Post not found: {self.id}")
+
+        post: ParserPost = parsed.parsed_data
+
+        if self.id != post.id:
+            raise InvalidIdTypeError(
+                f"Facebook resolved it to {post.id} instead. "
+                f"Use MediaPost.from_media_post_id() if {self.id} is a media post."
+            )
+        
+        data = post.model_dump(exclude_none=True)
+        for mp in data.get("media_posts", []):
+            mp["parent_post_id"] = post.id
+        self._data.update(data)
+        self._full_fetched = True
+
+
+    @property
+    def title(self) -> Optional[str]:
+        """
+        Post title as displayed by Facebook (e.g. ``"Luke Dizzle added 2 new photos."``).
+
+        :return: Post title, or ``None`` when unavailable.
+        :rtype: str or None
+        """
+        return self._field("title")
+
+    @property
+    def attachments(
+        self,
+    ) -> list[Photo | Video | AnimatedImage | ExternalLink | Sticker]:
+        """
+        Non-media-post attachments on this post (animated images, external
+        links, stickers, and other generic attachments).
+
+        :return: List of typed attachment objects.
+        :rtype: list
+        """
+        result = []
+        for att in self._field("attachments", default=[]):
+            converted = _dict_to_attachment(att)
+            if converted is not None:
+                result.append(converted)
+        return result
+    
+    @property
+    def media_posts_count(self) -> Optional[int]:
+        """
+        Number of media posts attached to this post.
+
+        :return: Media post count, or ``None`` when unavailable.
+        :rtype: int or None
+        """
+        return self._field("media_posts_count")
+    # ---------- media posts ----------
+
+
+    def get_media_posts(self) -> PaginatedIterator[MediaPost]:
+        """
+        Iterate over every media post attached to this post.
+
+        :return: Iterator yielding :class:`MediaPost` objects.
+        :rtype: PaginatedIterator[MediaPost]
+        """
+        if self.media_posts_count == 0:
+            return PaginatedIterator.empty(
+                iterator_type="post_media_posts",
+                query_variables={
+                    "postId": self.id,
+                },
+            )
+        
+        seed_media = self._field("media_posts", default=[])
+        seed_first_id = seed_media[0]["id"]
+        seed_last_id  = seed_media[-1]["id"]
+        media_post_graphql = CometPhotoRootContentQueryGraphQL(self._context)
+
+        def request_fn(cursor):
+            # cursor is the last-known media id from the previous page
+            return media_post_graphql.send(
+                mediaPostId=cursor,
+                postId=self.id,
+            ).text
+
+        def page_wrapper(parsed):
+            page: ParserMediaPost = parsed.parsed_data
+            raw_items = [page.model_dump()]
+            
+            # custom stop: if the first item of this page is the seed's first id,
+            # we've wrapped around — report no next page.
+            wrapped = (raw_items[0]["nextMediaAfterNodeId"] == seed_first_id)
+
+            # cursor for next fetch = last media id on this page
+            next_cursor = raw_items[0]["nextMediaAfterNodeId"]
+
+            page_info = {
+                "has_next_page": not wrapped,
+                "end_cursor": next_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw):
+            return MediaPost(self._context, raw, owner=self._owner, group=self._group, post=self)
+
+        it = PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="post_media_posts",
+            query_variables={"postId": self.id},
+        )
+
+        # seed the buffer with the media posts already attached to this post
+        it._raw_buffer = list(seed_media[:-1])      # ← pre-fill
+        it._cursor = seed_last_id              # ← first fetch continues after seed
+        return it
+    
     @classmethod
     def from_post_id(
         cls,
@@ -958,17 +1114,24 @@ class Post(FacebookModel):
                 "https",
                 p.netloc,
                 p.path.rstrip("/"),
-                "",
+                p.query,
                 "",
             )
         )
 
         normalized_post_url = re.escape(clean).replace("/", r"\\/")
-
-        pattern = rf'"post_id":"(\d+)"}},\"url\":\"{normalized_post_url}"'
+        from collections import Counter
+        pattern = rf'"url":"{normalized_post_url}","post_id":"(\d+)"'
         match = re.search(pattern, res.text)
 
         post_id = match.group(1) if match else None
+
+        matches = re.findall(r'"post_id":"(\d+)"', res.text)
+        if not matches:
+            raise PostNotFoundError(f"No post found for PFBID: {pfbid} (final URL: {final_url})")
+
+        if post_id is None:
+            post_id = Counter(matches).most_common(1)[0][0]
 
         if post_id:
             return cls.from_post_id(context, post_id)
@@ -1014,246 +1177,120 @@ class Profile(FacebookModel):
             response_user_collection_ids.text
         )
 
-        if parsed_user_collection_ids["parsed_data"] is None:
+        if parsed_user_collection_ids is None or parsed_user_collection_ids.parsed_data is None:
             raise ProfileNotFoundError(f"Profile not found: {self.id}")
+
+        profile: ParserProfileRef = parsed_user_collection_ids.parsed_data
+
+        about_section_token = (
+            profile.tabs.About.id
+            if profile.tabs and profile.tabs.About
+            else None
+        )
 
         user_about_collection_graphql = ProfileCometAboutAppSectionQueryGraphQL(
             self._context
         )
 
-        about_section_token = parsed_user_collection_ids["parsed_data"]["tabs"]["About"][
-            "id"
-        ]
-
-        def _fetch_about(collection_name):
+        def _fetch_about(collection_name) -> ParserAboutCollection:
             """Return parsed About payload for a collection, or {} if token is missing."""
-            token = safe_get(
-                parsed_user_collection_ids,
-                "parsed_data",
-                "tabs",
-                "About",
-                "collections",
-                collection_name,
+            token = (
+                profile.tabs.About.collections.get(collection_name)
+                if profile.tabs and profile.tabs.About
+                else None
             )
             if token is None or about_section_token is None:
-                return {}
+                return ParserAboutCollection()
+            
             response = user_about_collection_graphql.send(
                 userId=self.id,
                 sectionToken=about_section_token,
                 collectionToken=token,
             )
-            return self._context.parse_graphql_response(response.text) or {}
+            parsed_about = self._context.parse_graphql_response(response.text)
+            return parsed_about.parsed_data if parsed_about and parsed_about.parsed_data else ParserAboutCollection()
 
+
+            # ---- helpers ----
+        def _items(section):
+            return section.items if section and section.items else []
+
+        def _first_text(section):
+            items = _items(section)
+            return items[0].text if items else None
+
+        def _first_title(section):
+            items = _items(section)
+            return items[0].title if items else None
+    
         # directory_basic_info
-        parsed_directory_basic_info = _fetch_about("directory_basic_info")
-
-        biography = safe_get(
-            parsed_directory_basic_info,
-            "parsed_data",
-            "About",
-            "directory_bio",
-            "items",
-            0,
-            "title",
-        )
-
-        business_rating = safe_get(
-            parsed_directory_basic_info,
-            "parsed_data",
-            "About",
-            "directory_rating_and_reviews",
-            "items",
-            0,
-            "title",
-        )
-        business_address = safe_get(
-            parsed_directory_basic_info,
-            "parsed_data",
-            "About",
-            "directory_business_address",
-            "items",
-            0,
-            "title",
-        )
-        business_hours = safe_get(
-            parsed_directory_basic_info,
-            "parsed_data",
-            "About",
-            "directory_business_hours",
-            "items",
-            0,
-            "title",
-        )
+        basic = _fetch_about("directory_basic_info")
+        biography = _first_title(basic.directory_bio)
+        business_rating = _first_title(basic.directory_rating_and_reviews if hasattr(basic, "directory_rating_and_reviews") else None)
+        business_address = _first_title(basic.directory_business_address if hasattr(basic, "directory_business_address") else None)
+        business_hours = _first_title(basic.directory_business_hours if hasattr(basic, "directory_business_hours") else None)
 
         # directory_specialties
         # parsed_directory_specialties = _fetch_about("directory_specialties")
 
         # directory_intro
-        parsed_directory_intro = _fetch_about("directory_intro")
+        intro = _fetch_about("directory_intro")
         if biography is None:
-            biography = safe_get(
-                parsed_directory_intro,
-                "parsed_data",
-                "About",
-                "directory_bio",
-                "items",
-                0,
-                "text",
-            )
+            biography = _first_text(intro.directory_bio)
+
 
         # directory_category
         parsed_directory_category = _fetch_about("directory_category")
-
-        category = safe_get(
-            parsed_directory_category,
-            "parsed_data",
-            "About",
-            "directory_category",
-            "items",
-            0,
-            "title",
-        )
+        category = _first_title(parsed_directory_category.directory_category)
 
         # directory_personal_details
-        parsed_directory_personal_details = _fetch_about("directory_personal_details")
+        personal = _fetch_about("directory_personal_details")
 
-        current_location = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "directory_location",
-            "items",
-            0,
-            "title",
-        )
-        hometown = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "directory_hometown",
-            "items",
-            0,
-            "title",
-        )
+        current_location = _first_title(getattr(personal, "directory_location", None))
 
-        birthday_day = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "directory_birthday",
-            "items",
-            0,
-            "title",
-        )
-        birthday_year = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "directory_birthday",
-            "items",
-            1,
-            "title",
-        )
-        birthday = (
-            f"{birthday_day} {birthday_year}"
-            if (birthday_day or birthday_year)
-            else None
-        )
+        hometown = _first_title(getattr(personal, "directory_hometown", None))
 
-        relationship_type = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "relationship",
-            "items",
-            0,
-            "text",
-        )
-        if relationship_type is None:
-            relationship_type = safe_get(
-                parsed_directory_personal_details,
-                "parsed_data",
-                "About",
-                "relationship",
-                "items",
-                0,
-                "title",
-            )
+
+        birthday_section = getattr(personal, "directory_birthday", None)
+        birthday_items = _items(birthday_section)
+        birthday_day = birthday_items[0].title if len(birthday_items) > 0 else None
+        birthday_year = birthday_items[1].title if len(birthday_items) > 1 else None
+        birthday = f"{birthday_day} {birthday_year}" if (birthday_day or birthday_year) else None
+
+        rel_section = getattr(personal, "relationship", None)
+        rel_items = _items(rel_section)
+        rel_first = rel_items[0] if rel_items else None
+        relationship_type = (rel_first.text if rel_first else None) or (rel_first.title if rel_first else None)
         relationship = {
             "type": relationship_type,
-            "date": safe_get(
-                parsed_directory_personal_details,
-                "parsed_data",
-                "About",
-                "relationship",
-                "items",
-                0,
-                "item",
-                0,
-            ),
-            "desc": safe_get(
-                parsed_directory_personal_details,
-                "parsed_data",
-                "About",
-                "relationship",
-                "items",
-                0,
-                "item",
-                1,
-            ),
+            "date": (rel_first.item[0] if rel_first and rel_first.item and len(rel_first.item) > 0 else None),
+            "desc": (rel_first.item[1] if rel_first and rel_first.item and len(rel_first.item) > 1 else None),
         }
 
+        family_section = getattr(personal, "family", None)
         family = [
             {
-                "name": i.get("title"),
-                "type": safe_get(i, "item", 0),
+                "name": i.title,
+                "type": i.item[0] if i.item else None,
             }
-            for i in safe_get(
-                parsed_directory_personal_details,
-                "parsed_data",
-                "About",
-                "family",
-                "items",
-                default=[],
-            )
+            for i in _items(family_section)
         ]
 
-        language_title = safe_get(
-            parsed_directory_personal_details,
-            "parsed_data",
-            "About",
-            "directory_languages",
-            "items",
-            0,
-            "title",
-        )
+        lang_section = getattr(personal, "directory_languages", None)
+        lang_items = _items(lang_section)
+        language_title = lang_items[0].title if lang_items else None
         if language_title:
-            language = [
-                piece.strip()
-                for part in language_title.split(",")
-                for piece in part.split(" and ")
-                if piece.strip()
-            ]
+            language = [piece.strip() for part in language_title.split(",") for piece in part.split(" and ") if piece.strip()]
         else:
             language = None
 
         # directory_links
-        parsed_directory_links = _fetch_about("directory_links")
-
+        links_section = _fetch_about("directory_links").directory_links
         links = [
-            {
-                "link": safe_get(i, "item", 0),
-                "desc": i.get("title"),
-            }
-            for i in safe_get(
-                parsed_directory_links,
-                "parsed_data",
-                "About",
-                "directory_links",
-                "items",
-                default=[],
-            )
+            {"link": i.item[0] if i.item else None, "desc": i.title}
+            for i in _items(links_section)
         ]
+
         # directory_communities
         # parsed_directory_communities = _fetch_about("directory_communities")
 
@@ -1261,46 +1298,25 @@ class Profile(FacebookModel):
         # parsed_directory_offers = _fetch_about("directory_offers")
 
         # directory_work
-        parsed_directory_work = _fetch_about("directory_work")
-
+        work_section = _fetch_about("directory_work").directory_work
         works = [
-            {
-                "company": i.get("title"),
-                "desc": " | ".join(i.get("item")) if i.get("item") else None,
-            }
-            for i in safe_get(
-                parsed_directory_work,
-                "parsed_data",
-                "About",
-                "directory_work",
-                "items",
-                default=[],
-            )
+            {"company": i.title, "desc": " | ".join(i.item) if i.item else None}
+            for i in _items(work_section)
         ]
 
-        # directory_education
-        parsed_directory_education = _fetch_about("directory_education")
 
+        # directory_education
+        education = _fetch_about("directory_education")
         colleges = []
-        for i in safe_get(
-            parsed_directory_education,
-            "parsed_data",
-            "About",
-            "directory_college",
-            "items",
-            default=[],
-        ):
-            if i.get("title") == "University":
+        for i in _items(getattr(education, "directory_college", None)):
+            if i.title == "University":
                 continue
-            item_list = i.get("item") or []
+            item_list = i.item or []
             college = {
-                "name": i.get("title"),
-                "date": safe_get(item_list, 0),
-                "subject": None,
-                "activities": None,
-                "dorm": None,
-                "classes": None,
-                "desc": None,
+                "name": i.title,
+                "date": item_list[0] if len(item_list) > 0 else None,
+                "subject": None, "activities": None, "dorm": None,
+                "classes": None, "desc": None,
             }
             for raw in item_list[1:]:
                 text = (raw or "").strip()
@@ -1317,58 +1333,26 @@ class Profile(FacebookModel):
             colleges.append(college)
 
         high_schools = []
-        for i in safe_get(
-            parsed_directory_education,
-            "parsed_data",
-            "About",
-            "directory_high_school",
-            "items",
-            default=[],
-        ):
-            if i.get("title") == "Secondary school":
+        for i in _items(getattr(education, "directory_high_school", None)):
+            if i.title == "Secondary school":
                 continue
-            high_schools.append(
-                {
-                    "name": i.get("title"),
-                    "date": safe_get(i, "item", 0),
-                }
-            )
+            high_schools.append({"name": i.title, "date": i.item[0] if i.item else None})
 
         # directory_activites
-        parsed_directory_activites = _fetch_about("directory_activites")
-
+        activities = _fetch_about("directory_activites")
         hobbies = [
-            {
-                "name": i.get("title"),
-                "desc": safe_get(i, "item", 0),
-            }
-            for i in safe_get(
-                parsed_directory_activites,
-                "parsed_data",
-                "About",
-                "directory_hobbies",
-                "items",
-                default=[],
-            )
+            {"name": i.title, "desc": i.item[0] if i.item else None}
+            for i in _items(getattr(activities, "directory_hobbies", None))
         ]
 
+
         # directory_interests
-        parsed_directory_interests = _fetch_about("directory_interests")
+        interests_col = _fetch_about("directory_interests")
 
         def _interest_rows(node_key):
             return [
-                {
-                    "name": i.get("title"),
-                    "desc": safe_get(i, "item", 0),
-                }
-                for i in safe_get(
-                    parsed_directory_interests,
-                    "parsed_data",
-                    "About",
-                    node_key,
-                    "items",
-                    default=[],
-                )
+                {"name": i.title, "desc": i.item[0] if i.item else None}
+                for i in _items(getattr(interests_col, node_key, None))
             ]
 
         interests = {
@@ -1380,123 +1364,77 @@ class Profile(FacebookModel):
         }
 
         # directory_travel
-        parsed_directory_travel = _fetch_about("directory_travel")
-
+        travels_col = _fetch_about("directory_travel")
         travels = []
-        for i in safe_get(
-            parsed_directory_travel,
-            "parsed_data",
-            "About",
-            "directory_travel",
-            "items",
-            default=[],
-        ):
-            raw = safe_get(i, "item", 0)
+        for i in _items(getattr(travels_col, "directory_travel", None)):
+            raw = i.item[0] if i.item else None
             if not raw:
                 continue
             before, sep, after = raw.rpartition(":")
-            travels.append(
-                {
-                    "name": before.strip() if sep else raw.strip(),
-                    "date": after.strip() if sep else None,
-                }
-            )
+            travels.append({
+                "name": before.strip() if sep else raw.strip(),
+                "date": after.strip() if sep else None,
+            })
 
         # directory_contact_info
-        parsed_directory_contact_info = _fetch_about("directory_contact_info")
+        contact_col = _fetch_about("directory_contact_info")
 
         def _contact_rows(node_key):
+            section = getattr(contact_col, node_key, None)
             return [
                 {
-                    "type": safe_get(i, "item", 0,
-                        default=safe_get(
-                            parsed_directory_contact_info,
-                            "parsed_data",
-                            "About",
-                            node_key,
-                            "category",
-                        ),
-                    ),
-                    "name": i.get("title"),
+                    "type": (i.item[0] if i.item else None) or (section.category if section else None),
+                    "name": i.title,
                 }
-                for i in safe_get(
-                    parsed_directory_contact_info,
-                    "parsed_data",
-                    "About",
-                    node_key,
-                    "items",
-                    default=[],
-                )
+                for i in _items(section)
             ]
 
-        contacts = [
-            {
-                "socials": _contact_rows("directory_socials"),
-                "phones": _contact_rows("directory_phone"),
-                "emails": _contact_rows("directory_email"),
-                "messenger": _contact_rows("directory_messenger"),
-                "whatsapp_number": _contact_rows("directory_whatsapp"),
-                "media_kit": _contact_rows("directory_media_kit"),
-            }
-        ]
+        contacts = [{
+            "socials": _contact_rows("directory_socials"),
+            "phones": _contact_rows("directory_phone"),
+            "emails": _contact_rows("directory_email"),
+            "messenger": _contact_rows("directory_messenger"),
+            "whatsapp_number": _contact_rows("directory_whatsapp"),
+            "media_kit": _contact_rows("directory_media_kit"),
+        }]
 
         # directory_privacy_and_legal_info
-        parsed_directory_privacy_and_legal_info = _fetch_about(
-            "directory_privacy_and_legal_info"
-        )
-        description = safe_get(
-            parsed_directory_privacy_and_legal_info,
-            "parsed_data",
-            "About",
-            "description",
-            "items",
-            0,
-            "text",
-        )
+        privacy = _fetch_about("directory_privacy_and_legal_info")
+        description = _first_text(getattr(privacy, "description", None))
 
         # directory_names
-        parsed_directory_names = _fetch_about("directory_names")
-
+        names_col = _fetch_about("directory_names")
         name_pronunciation = [
-            {"name": i.get("text")}
-            for i in safe_get(
-                parsed_directory_names,
-                "parsed_data",
-                "About",
-                "name_pronunciation",
-                "items",
-                default=[],
-            )
-            if i.get("text")
+            {"name": i.text}
+            for i in _items(getattr(names_col, "name_pronunciation", None))
+            if i.text
         ]
-
         nicknames = [
-            {
-                "type": safe_get(i, "item", 0),
-                "name": i.get("title"),
-            }
-            for i in safe_get(
-                parsed_directory_names,
-                "parsed_data",
-                "About",
-                "nicknames",
-                "items",
-                default=[],
-            )
+            {"type": i.item[0] if i.item else None, "name": i.title}
+            for i in _items(getattr(names_col, "nicknames", None))
         ]
-        user_data = {
-            "id": parsed_user_collection_ids["parsed_data"]["author_profile"]["id"],
-            "name": parsed_user_collection_ids["parsed_data"]["author_profile"]["name"],
-            "alternate_name": parsed_user_collection_ids["parsed_data"]["author_profile"]["alternate_name"],
-            "gender": parsed_user_collection_ids["parsed_data"]["author_profile"]["gender"],
-            "url": parsed_user_collection_ids["parsed_data"]["author_profile"]["url"],
-            "status_text": parsed_user_collection_ids["parsed_data"]["author_profile"]["status_text"],
-            "profile_picture_url": parsed_user_collection_ids["parsed_data"]["author_profile"]["profile_picture_url"],
-            "is_verified": parsed_user_collection_ids["parsed_data"]["author_profile"]["is_verified"],
 
-            "followers_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["followers_count"],
-            "followees_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["followees_count"],
-            "friends_count": parsed_user_collection_ids["parsed_data"]["author_profile"]["friends_count"],
+        tabs_dict = {}
+        if profile.tabs:
+            for tab_name in ("About", "Followers", "Friends", "Photos", "Reels"):
+                tab = getattr(profile.tabs, tab_name, None)
+                tabs_dict[tab_name] = (
+                    {"id": tab.id, "collections": tab.collections}
+                    if tab else {"id": None, "collections": {}}
+                )
+
+        user_data = {
+            "id": profile.id,
+            "name": profile.name,
+            "alternate_name": profile.alternate_name,
+            "gender": profile.gender,
+            "url": profile.url,
+            "status_text": profile.status_text,
+            "profile_picture_url": profile.profile_picture_url,
+            "is_verified": profile.is_verified,
+            "followers_count": profile.followers_count,
+            "followees_count": profile.followees_count,
+            "friends_count": profile.friends_count,
             "biography": biography,
             "category": category,
             "current_location": current_location,
@@ -1519,72 +1457,7 @@ class Profile(FacebookModel):
             "business_rating": business_rating,
             "business_address": business_address,
             "business_hours": business_hours,
-            "tabs": {
-                "About": {
-                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["id"],
-                    "collections": {
-                        "directory_basic_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_basic_info"],
-                        "directory_specialties": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_specialties"],
-                        "directory_intro": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_intro"],
-                        "directory_category": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_category"],
-                        "directory_personal_details": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_personal_details"],
-                        "directory_links": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_links"],
-                        "directory_communities": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_communities"],
-                        "directory_offers": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_offers"],
-                        "directory_work": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_work"],
-                        "directory_education": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_education"],
-                        "directory_activites": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_activites"],
-                        "directory_interests": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_interests"],
-                        "directory_travel": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_travel"],
-                        "directory_contact_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_contact_info"],
-                        "directory_privacy_and_legal_info": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_privacy_and_legal_info"],
-                        "directory_names": parsed_user_collection_ids["parsed_data"]["tabs"]["About"]["collections"]["directory_names"],
-                    },
-                },
-                "Followers": {
-                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["id"],
-                    "collections": {
-                        "followers": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["followers"],
-                        "followers_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["followers_mutual"],
-                        "following": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["following"],
-                        "following_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["following_mutual"],
-                        "friends_all": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["friends_all"],
-                        "friends_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Followers"]["collections"]["friends_mutual"],
-                    },
-                },
-                "Friends": {
-                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["id"],
-                    "collections": {
-                        "friends_all": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_all"],
-                        "friends_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_mutual"],
-                        "friends_recent": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_recent"],
-                        "friends_with_upcoming_birthdays": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_with_upcoming_birthdays"],
-                        "friends_work": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_work"],
-                        "friends_college": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_college"],
-                        "friends_high_school": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_high_school"],
-                        "friends_current_city": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_current_city"],
-                        "friends_hometown": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["friends_hometown"],
-                        "followers": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["followers"],
-                        "following": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["following"],
-                        "followers_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["followers_mutual"],
-                        "following_mutual": parsed_user_collection_ids["parsed_data"]["tabs"]["Friends"]["collections"]["following_mutual"],
-                    },
-                },
-                "Photos": {
-                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["id"],
-                    "collections": {
-                        "photos_by": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_by"],
-                        "photos_albums": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_albums"],
-                        "photos_of": parsed_user_collection_ids["parsed_data"]["tabs"]["Photos"]["collections"]["photos_of"],
-                    },
-                },
-                "Reels": {
-                    "id": parsed_user_collection_ids["parsed_data"]["tabs"]["Reels"]["id"],
-                    "collections": {
-                        "owner_reels": parsed_user_collection_ids["parsed_data"]["tabs"]["Reels"]["collections"]["owner_reels"],
-                    }
-                }
-            },
+            "tabs": tabs_dict,
         }
 
         self._data.update(user_data)
@@ -1989,7 +1862,7 @@ class Profile(FacebookModel):
         Iterate over profiles following this user.
 
         :return: Iterator yielding :class:`Profile` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[Profile]
         :raises FollowersNotAvailableException: If the follower collection
             is unavailable for this profile.
         """
@@ -2009,19 +1882,15 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "url": item["url"],
-                    "profile_picture_url": item["profile_picture_url"],
-                    "is_verified": item["is_verified"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump(exclude_none=True)
+                for item in page.items
+                if isinstance(item, ParserProfileRef)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2042,7 +1911,7 @@ class Profile(FacebookModel):
         Iterate over profiles followed by this user.
 
         :return: Iterator yielding :class:`Profile` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[Profile]
         :raises FolloweesNotAvailableException: If the following collection
             is unavailable for this profile.
         """
@@ -2062,19 +1931,15 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "url": item["url"],
-                    "profile_picture_url": item["profile_picture_url"],
-                    "is_verified": item["is_verified"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump(exclude_none=True)
+                for item in page.items
+                if isinstance(item, ParserProfileRef)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2095,7 +1960,7 @@ class Profile(FacebookModel):
         Iterate over users who have a follower relationship with this user.
 
         :return: Iterator yielding :class:`Profile` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[Profile]
         :raises FriendFollowersNotAvailableException: If the corresponding
             collection is unavailable.
         """
@@ -2115,19 +1980,15 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "url": item["url"],
-                    "profile_picture_url": item["profile_picture_url"],
-                    "is_verified": item["is_verified"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump(exclude_none=True)
+                for item in page.items
+                if isinstance(item, ParserProfileRef)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2149,7 +2010,7 @@ class Profile(FacebookModel):
         relationship collection.
 
         :return: Iterator yielding :class:`Profile` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[Profile]
         :raises FriendFolloweesNotAvailableException: If the corresponding
             collection is unavailable.
         """
@@ -2169,19 +2030,15 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "name": item["name"],
-                    "url": item["url"],
-                    "profile_picture_url": item["profile_picture_url"],
-                    "is_verified": item["is_verified"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump(exclude_none=True)
+                for item in page.items
+                if isinstance(item, ParserProfileRef)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2197,12 +2054,15 @@ class Profile(FacebookModel):
             query_variables={"id": collection_id},
         )
 
-    def get_posts(self) -> PaginatedIterator[Post]:
+    def get_posts(self) -> PaginatedIterator[PostBase]:
         """
         Iterate over posts published by this profile.
 
-        :return: Iterator yielding :class:`Post` objects.
-        :rtype: PaginatedIterator
+        Yields either :class:`Post` or :class:`MediaPost` objects, depending on
+        the feed unit.
+
+        :return: Iterator yielding :class:`Post` or :class:`MediaPost` objects.
+        :rtype: PaginatedIterator[PostBase]
         """
         timeline_graphql = ProfileCometTimelineFeedRefetchQueryGraphQL(self._context)
 
@@ -2210,45 +2070,22 @@ class Profile(FacebookModel):
             return timeline_graphql.send(userId=self._field("id"), cursor=cursor).text
 
         def page_wrapper(parsed):
+            page: ParserTimelinePage = parsed.parsed_data
+
             raw_items = [
-                {
-                    "id": item["id"],
-                    "creation_time": item["creation_time"],
-                    "url": item["url"],
-                    "title": item["title"],
-                    "text": item["text"],
-                    "attachments": [
-                        _attachment_to_dict(a) for a in item["attachments"]
-                    ],
-                    "share_count": item["share_count"],
-                    "comments_count": item["comments_count"],
-                    "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "url": item["author"]["url"],
-                    },
-                    "reactors_visible": item["reactors_visible"],
-                    "reactions": {
-                        "total": item["reactions"]["total"],
-                        "breakdown": [
-                            {
-                                "id": entry["id"],
-                                "name": entry["name"],
-                                "count": entry["count"],
-                            }
-                            for entry in item["reactions"]["breakdown"]
-                        ],
-                    },
-                }
-                for item in parsed["parsed_data"]["posts"]
+                feed.model_dump(exclude_none=True)
+                for feed in page.feeds
             ]
+
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
         def item_wrapper(raw):
+            if raw.get("type") == "media_post":
+                return MediaPost(self._context, raw, owner=self)
             return Post(self._context, raw, owner=self)
 
         return PaginatedIterator(
@@ -2260,12 +2097,12 @@ class Profile(FacebookModel):
             query_variables={"userId": self.id},
         )
 
-    def get_photos(self) -> PaginatedIterator[Photo]:
+    def get_photo_posts(self)  -> PaginatedIterator[MediaPost[Photo]]:
         """
-        Iterate over photos associated with this profile.
+        Iterate over photo posts published by this profile.
 
-        :return: Iterator yielding :class:`Photo` objects.
-        :rtype: PaginatedIterator
+        :return: Iterator yielding :class:`MediaPost` objects with photo media.
+        :rtype: PaginatedIterator[MediaPost[Photo]]
         :raises PhotoNotAvailableException: If the photo collection is
             unavailable for this profile.
         """
@@ -2285,26 +2122,21 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "image_url": item["image_url"],
-                    "url": item["url"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump()
+                for item in page.items
+                if isinstance(item, ParserMediaPost)
+                and isinstance(item.media, ParserPhotoMedia)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
-        def item_wrapper(raw):
-            return Photo(
-                id=raw["id"],
-                image_url=raw["image_url"],
-                url=raw["url"],
-            )
+        def item_wrapper(raw: dict) -> MediaPost[Photo]:
+            return MediaPost[Photo](self._context, raw)
 
         return PaginatedIterator(
             request_fn=request_fn,
@@ -2315,12 +2147,12 @@ class Profile(FacebookModel):
             query_variables={"id": collection_id},
         )
 
-    def get_videos(self) -> PaginatedIterator[Video]:
+    def get_video_posts(self) -> PaginatedIterator[MediaPost[Video]]:
         """
-        Iterate over reels or short-form videos associated with this profile.
+        Iterate over video posts (reels) published by this profile.
 
-        :return: Iterator yielding :class:`Video` objects.
-        :rtype: PaginatedIterator
+        :return: Iterator yielding :class:`MediaPost` objects with video media.
+        :rtype: PaginatedIterator[MediaPost[Video]]
         :raises ReelsNotAvailableException: If the reels collection is
             unavailable for this profile.
         """
@@ -2340,34 +2172,21 @@ class Profile(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserCollectionPage = parsed.parsed_data
             raw_items = [
-                {
-                    "id": item["id"],
-                    "length_in_second": item["length_in_second"],
-                    "created_time": item["created_time"],
-                    "thumbnail_image_url": item["thumbnail_image_url"],
-                    "video_url": item["video_url"],
-                    "url": item["url"],
-                    "play_count": item["play_count"],
-                }
-                for item in parsed["parsed_data"]["items"]
+                item.model_dump()
+                for item in page.items
+                if isinstance(item, ParserMediaPost)
+                and isinstance(item.media, ParserVideoMedia)
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
-        def item_wrapper(raw):
-            return Video(
-                id=raw["id"],
-                length_in_second=raw["length_in_second"],
-                created_time=raw["created_time"],
-                thumbnail_image_url=raw["thumbnail_image_url"],
-                video_url=raw["video_url"],
-                url=raw["url"],
-                play_count=raw["play_count"],
-            )
+        def item_wrapper(raw: dict) -> MediaPost[Video]:
+            return MediaPost[Video](self._context, raw)
 
         return PaginatedIterator(
             request_fn=request_fn,
@@ -2393,7 +2212,7 @@ class Comment(FacebookModel):
     :param owner: Profile that authored the comment, if already known.
     :type owner: Profile or None
     :param post: Parent post of the comment.
-    :type post: Post or None
+    :type post: Post | MediaPost | None
     :param comment: Parent comment when this object represents a reply.
     :type comment: Comment or None
     """
@@ -2403,7 +2222,7 @@ class Comment(FacebookModel):
         context: FacebookContext,
         data: dict,
         owner: Profile = None,
-        post: Post = None,
+        post: "Post | MediaPost" = None,
         comment: "Comment" = None,
     ):
         super().__init__(context, data)
@@ -2437,22 +2256,22 @@ class Comment(FacebookModel):
         return self._field("text")
 
     @property
-    def created_time(self) -> Optional[int]:
+    def creation_time(self) -> Optional[int]:
         """
         Creation timestamp of the comment.
 
         :return: Comment creation timestamp.
         :rtype: int or None
         """
-        return self._field("created_time")
+        return self._field("creation_time")
 
     @property
-    def reaction_count(self) -> Optional[str]:
+    def reaction_count(self) -> Optional[int]:
         """
         Number of reactions on the comment.
 
         :return: Reaction count.
-        :rtype: str
+        :rtype: int
         """
         return self._field("reaction_count")
 
@@ -2484,7 +2303,7 @@ class Comment(FacebookModel):
         and reply expansion token.
 
         :return: Iterator yielding reply :class:`Comment` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[Comment]
         :raises MissingParentError: If the comment has no parent post.
         """
         comment_replies_graphql = Depth1CommentsListPaginationQueryGraphQL(self._context)
@@ -2513,30 +2332,12 @@ class Comment(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
-            raw_items = [
-                {
-                    "id": item["id"],
-                    "text": item["text"],
-                    "attachments": [
-                        _attachment_to_dict(att) for att in item["attachments"]
-                    ],
-                    "created_time": item["created_time"],
-                    "reaction_count": item["reaction_count"],
-                    "reply_count": item["reply_count"],
-                    "reply_expansion_token": item["reply_expansion_token"],
-                    "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "gender": item["author"]["gender"],
-                        "url": item["author"]["url"],
-                        "profile_picture_url": item["author"]["profile_picture_url"],
-                    },
-                }
-                for item in parsed["parsed_data"]["replies"]
-            ]
+            page: ParserRepliesPage = parsed.parsed_data
+            raw_items = [c.model_dump(exclude_none=True) for c in page.replies]
+
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2588,21 +2389,22 @@ class Comment(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
+            page: ParserReactorsPage = parsed.parsed_data
             raw_items = [
                 {
-                    "reaction_type_id": item["reaction_type_id"],
+                    "reaction_type_id": r.reaction_type_id,
                     "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "url": item["author"]["url"],
-                        "profile_picture_url": item["author"]["profile_picture_url"],
+                        "id": r.author.id if r.author else None,
+                        "name": r.author.name if r.author else None,
+                        "url": r.author.url if r.author else None,
+                        "profile_picture_url": r.author.profile_picture_url if r.author else None,
                     },
                 }
-                for item in parsed["parsed_data"]["reactors"]
+                for r in page.reactors
             ]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
@@ -2654,26 +2456,23 @@ class Comment(FacebookModel):
         return None
 
     @property
-    def post(self) -> Optional[Post]:
+    def post(self) -> Optional["Post | MediaPost"]:
         """
         Return the parent post of the comment.
 
         :return: Parent post, or ``None`` if no parent post is known.
-        :rtype: Post or None
+        :rtype: Post | MediaPost | None
         """
         return self._post
 
     @property
-    def attachments(self) -> Optional[list[Photo | Video | GenericMedia | Sticker]]:
+    def attachments(self) -> list[Photo | Video | AnimatedImage | ExternalLink | Sticker]:
         """
         Return the comment's media attachments as typed objects.
 
         :return: List of typed attachment objects.
         :rtype: list
         """
-
-        if self._field("attachments") is None:
-            return None
 
         result = []
         for att in self._field("attachments", default=[]):
@@ -2717,29 +2516,27 @@ class Group(FacebookModel):
         response_group_partial_graphql = group_partial_graphql.send(groupId=self.id)
         parsed_group_partial_graphql = self._context.parse_graphql_response(response_group_partial_graphql.text)
 
-        if parsed_group_partial_graphql["parsed_data"] is None:
-            raise GroupNotFoundError(
-                f"Group not found: {self.id}"
-            )
+        if parsed_group_partial_graphql is None or parsed_group_partial_graphql.parsed_data is None:
+            raise GroupNotFoundError(f"Group not found: {self.id}")
 
         group_about_info_graphql = CometGroupAboutRootQueryGraphQL(self._context)
         response_group_about_info_graphql = group_about_info_graphql.send(groupId=self.id)
         parsed_group_about_info_graphql = self._context.parse_graphql_response(response_group_about_info_graphql.text)
 
-        group_profile = {
-            "id": parsed_group_partial_graphql["parsed_data"]["id"],
-            "name": parsed_group_partial_graphql["parsed_data"]["name"],
-            "url": parsed_group_partial_graphql["parsed_data"]["url"],
-            "privacy": parsed_group_partial_graphql["parsed_data"]["privacy"],
-            "member_count": parsed_group_partial_graphql["parsed_data"]["member_count"],
-            "profile_picture_url": parsed_group_partial_graphql["parsed_data"]["profile_picture_url"],
-            "created_time": parsed_group_about_info_graphql["parsed_data"]["created_time"],
-            "description": parsed_group_about_info_graphql["parsed_data"]["description"],
-            "privacy_info": parsed_group_about_info_graphql["parsed_data"]["privacy_info"],
-            "discoverability_info": parsed_group_about_info_graphql["parsed_data"]["discoverability_info"],
-        }
+        partial: ParserGroup = parsed_group_partial_graphql.parsed_data
+        about: Optional[ParserGroup] = parsed_group_about_info_graphql.parsed_data if parsed_group_about_info_graphql else None
 
-        self._data.update(group_profile)
+        self._data.update({
+            "id": partial.id,
+            "name": partial.name,
+            "url": partial.url,
+            "member_count": partial.member_count,
+            "profile_picture_url": partial.profile_picture_url,
+            "creation_time": about.creation_time if about else None,
+            "description": about.description if about else None,
+            "privacy_info": about.privacy_info if about else None,
+            "discoverability_info": about.discoverability_info if about else None,
+        })
         self._full_fetched = True
 
     # ---------- identity ----------
@@ -2777,16 +2574,6 @@ class Group(FacebookModel):
     # ---------- metadata ----------
 
     @property
-    def privacy(self) -> Optional[str]:
-        """
-        Privacy setting of the group.
-
-        :return: Group privacy information.
-        :rtype: str or None
-        """
-        return self._field("privacy")
-
-    @property
     def member_count(self) -> Optional[int]:
         """
         Number of members in the group.
@@ -2807,14 +2594,14 @@ class Group(FacebookModel):
         return self._field("profile_picture_url")
 
     @property
-    def created_time(self) -> Optional[int]:
+    def creation_time(self) -> Optional[int]:
         """
         Creation timestamp of the group.
 
         :return: Group creation timestamp.
         :rtype: int or None
         """
-        return self._field("created_time")
+        return self._field("creation_time")
 
     @property
     def description(self) -> Optional[str]:
@@ -2846,12 +2633,15 @@ class Group(FacebookModel):
         """
         return self._field("discoverability_info")
 
-    def get_posts(self) -> PaginatedIterator[Post]:
+    def get_posts(self) -> PaginatedIterator[PostBase]:
         """
         Iterate over posts published in the group.
 
-        :return: Iterator yielding :class:`Post` objects.
-        :rtype: PaginatedIterator
+        Yields either :class:`Post` or :class:`MediaPost` objects, depending on
+        the feed unit.
+
+        :return: Iterator yielding :class:`Post` or :class:`MediaPost` objects.
+        :rtype: PaginatedIterator[PostBase]
         """
         group_timeline_graphql = GroupsCometFeedRegularStoriesPaginationQueryGraphQL(self._context)
 
@@ -2859,45 +2649,22 @@ class Group(FacebookModel):
             return group_timeline_graphql.send(groupId=self._field("id"), cursor=cursor).text
 
         def page_wrapper(parsed):
+            page: ParserTimelinePage = parsed.parsed_data
+
             raw_items = [
-                {
-                    "id": item["id"],
-                    "creation_time": item["creation_time"],
-                    "url": item["url"],
-                    "title": item["title"],
-                    "text": item["text"],
-                    "attachments": [
-                        _attachment_to_dict(a) for a in item["attachments"]
-                    ],
-                    "share_count": item["share_count"],
-                    "comments_count": item["comments_count"],
-                    "author": {
-                        "id": item["author"]["id"],
-                        "name": item["author"]["name"],
-                        "url": item["author"]["url"],
-                    },
-                    "reactors_visible": item["reactors_visible"],
-                    "reactions": {
-                        "total": item["reactions"]["total"],
-                        "breakdown": [
-                            {
-                                "id": entry["id"],
-                                "name": entry["name"],
-                                "count": entry["count"],
-                            }
-                            for entry in item["reactions"]["breakdown"]
-                        ],
-                    },
-                }
-                for item in parsed["parsed_data"]["posts"]
+                feed.model_dump(exclude_none=True)
+                for feed in page.feeds
             ]
+
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
         def item_wrapper(raw):
+            if raw.get("type") == "media_post":
+                return MediaPost(self._context, raw, group=self)
             return Post(self._context, raw, group=self)
 
         return PaginatedIterator(
@@ -2909,12 +2676,82 @@ class Group(FacebookModel):
             query_variables={"groupId": self.id},
         )
 
+    def get_photo_posts(self) -> PaginatedIterator[MediaPost[Photo]]:
+        """
+        Iterate over photo posts in the group's media set.
+
+        :return: Iterator yielding :class:`MediaPost` objects with photo media.
+        :rtype: PaginatedIterator[MediaPost[Photo]]
+        """
+        graphql = GroupsCometMediaPhotosTabGridQueryGraphQL(self._context)
+
+        def request_fn(cursor):
+            return graphql.send(groupId=self.id, cursor=cursor).text
+
+        def page_wrapper(parsed):
+            page: ParserMediaPostsPage = parsed.parsed_data
+            raw_items = [mp.model_dump() for mp in page.media_posts]
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw: dict) -> MediaPost[Photo]:
+            return MediaPost(self._context, raw)
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="group_mediaset",
+            query_variables={"groupId": self.id},
+        )
+
+    def get_video_posts(self) -> PaginatedIterator[MediaPost[Video]]:
+        """
+        Iterate over video posts in the group's media set.
+
+        :return: Iterator yielding MediaPost objects with Video media.
+        :rtype: PaginatedIterator[MediaPost[Video]]
+        """
+        graphql = GroupsCometMediaVideosTabGridQueryGraphQL(self._context)
+
+        def request_fn(cursor):
+            return graphql.send(groupId=self.id, cursor=cursor).text
+
+        def page_wrapper(parsed):
+            page: ParserMediaPostsPage = parsed.parsed_data
+            raw_items = [
+                mp.model_dump()
+                for mp in page.media_posts
+                if isinstance(mp.media, ParserVideoMedia)
+            ]
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw: dict) -> MediaPost[Video]:
+            return MediaPost(self._context, raw)
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="group_mediaset_videos",
+            query_variables={"groupId": self.id},
+        )
+
     def get_members(self) -> PaginatedIterator[GroupMember]:
         """
         Iterate over members of the group.
 
         :return: Iterator yielding :class:`GroupMember` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[GroupMember]
         """
         group_member_graphql = GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(self._context)
 
@@ -2925,29 +2762,19 @@ class Group(FacebookModel):
             ).text
 
         def page_wrapper(parsed):
-            raw_items = [
-                {
-                    "join_status": item["join_status"],
-                    "contribution_score": item["contribution_score"],
-                    "account": {
-                        "id": item["account"]["id"],
-                        "name": item["account"]["name"],
-                        "url": item["account"]["url"],
-                        "profile_picture_url": item["account"]["profile_picture_url"],
-                    },
-                }
-                for item in parsed["parsed_data"]["members"]
-            ]
+            page: ParserGroupMembersPage = parsed.parsed_data
+            raw_items = [m.model_dump(exclude_none=True) for m in page.members]
+
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 
         def item_wrapper(raw):
             return GroupMember(
-                join_status=raw["join_status"],
-                contribution_score=raw["contribution_score"],
+                join_status=raw.get("join_status"),
+                contribution_score=raw.get("contribution_score"),
                 profile=Profile(self._context, raw["account"]),
             )
 
@@ -2988,7 +2815,7 @@ class Group(FacebookModel):
         cls,
         context: FacebookContext,
         groupname: str,
-    ) -> "Profile":
+    ) -> "Group":
         """
         Create a group from its Facebook groupname.
 
@@ -3044,7 +2871,6 @@ class MarketplaceListing(FacebookModel):
         Fetch and merge complete listing metadata.
 
         :return: ``None``.
-        :rty
         """
         if self._full_fetched:
             return
@@ -3053,10 +2879,11 @@ class MarketplaceListing(FacebookModel):
         response_marketplace_pdp_graphql = marketplace_pdp_graphql.send(marketListingId=self.id)
         parsed_marketplace_pdp_graphql = self._context.parse_graphql_response(response_marketplace_pdp_graphql.text)
 
-        if parsed_marketplace_pdp_graphql["parsed_data"] is None:
-            raise MarketplaceListingNotFoundError(
-                f"Marketplace listing not found: {self.id}"
-            )
+        if parsed_marketplace_pdp_graphql is None or parsed_marketplace_pdp_graphql.parsed_data is None:
+                raise MarketplaceListingNotFoundError(f"Marketplace listing not found: {self.id}")
+
+        pdp: ParserMarketplacePDP = parsed_marketplace_pdp_graphql.parsed_data
+        listing = pdp.listing
 
         # Fetch media separately (Meta splits PDP into two responses)
 
@@ -3064,106 +2891,91 @@ class MarketplaceListing(FacebookModel):
         response_marketplace_pdp_media_graphql = marketplace_pdp_media_graphql.send(marketListingId=self.id)
         parsed_marketplace_pdp_media_graphql = self._context.parse_graphql_response(response_marketplace_pdp_media_graphql.text)
 
+        media: Optional[ParserMarketplaceMedia] = (
+            parsed_marketplace_pdp_media_graphql.parsed_data if parsed_marketplace_pdp_media_graphql else None
+        )
 
-        listing = parsed_marketplace_pdp_graphql["parsed_data"]["listing"]
-        seller = listing["seller"]
-        seller_profile = seller["profile"]
-        partner = listing["partner"]
-        partner_profile = partner["profile"]
-        seller_stats = seller["seller_stats"]
-        combined_stats = seller["seller_buyer_combined"]
+        seller = listing.seller
+        partner = listing.partner
+        seller_stats = seller.seller_stats if seller else ParserSellerStats()
+        combined_stats = seller.seller_buyer_combined if seller else ParserSellerStats()
 
-        market_listing_data = {
-            "id": listing["id"],
-            "category_id": listing["category_id"],
-            "url": listing["url"],
-            "post_id": listing["post_id"],
-            "creation_time": listing["creation_time"],
-            "currency": listing["currency"],
-            "price": listing["price"],
-            "strikethrough_price": listing["strikethrough_price"],
-            "location_text": listing["location_text"],
-            "latitude": listing["latitude"],
-            "longitude": listing["longitude"],
-            "title": listing["title"],
-            "description": listing["description"],
-            "discounts_text": listing["discounts_text"],
-            "is_live": listing["is_live"],
-            "is_pending": listing["is_pending"],
-            "is_sold": listing["is_sold"],
-            "is_hidden": listing["is_hidden"],
-            "is_on_marketplace": listing["is_on_marketplace"],
+        self._data.update({
+            "id": listing.id,
+            "category_id": listing.category_id,
+            "url": listing.url,
+            "post_id": listing.post_id,
+            "creation_time": listing.creation_time,
+            "currency": listing.currency,
+            "price": listing.price,
+            "strikethrough_price": listing.strikethrough_price,
+            "location_text": listing.location_text,
+            "latitude": listing.latitude,
+            "longitude": listing.longitude,
+            "title": listing.title,
+            "description": listing.description,
+            "discounts_text": listing.discounts_text,
+            "is_live": listing.is_live,
+            "is_pending": listing.is_pending,
+            "is_sold": listing.is_sold,
+            "is_hidden": listing.is_hidden,
+            "is_on_marketplace": listing.is_on_marketplace,
             "seller": {
                 "profile": {
-                    "id": seller_profile["id"],
-                    "name": seller_profile["name"],
-                    "profile_picture_url": seller_profile["profile_picture_url"],
-                    "joined_time": seller_profile["joined_time"],
+                    "id": seller.profile.id if seller and seller.profile else None,
+                    "name": seller.profile.name if seller and seller.profile else None,
+                    "profile_picture_url": seller.profile.profile_picture_url if seller and seller.profile else None,
                 },
-                "verified_badge": seller["verified_badge"],
-                "seller_ratings_are_private": seller["seller_ratings_are_private"],
+                "joined_time": seller.joined_time if seller else None,
+                "verified_badge": seller.verified_badge if seller else None,
+                "seller_ratings_are_private": seller.seller_ratings_are_private if seller else None,
                 "seller_stats": {
-                    "five_star_ratings_average":            seller_stats["five_star_ratings_average"],
-                    "five_star_total_rating_count_by_role": seller_stats["five_star_total_rating_count_by_role"],
+                    "five_star_ratings_average": seller_stats.five_star_ratings_average,
+                    "five_star_total_rating_count_by_role": seller_stats.five_star_total_rating_count_by_role,
                 },
-                "seller_buyer_combined_ratings_are_private": seller["seller_buyer_combined_ratings_are_private"],
+                "seller_buyer_combined_ratings_are_private": seller.seller_buyer_combined_ratings_are_private if seller else None,
                 "seller_buyer_combined": {
-                    "five_star_ratings_average":            combined_stats["five_star_ratings_average"],
-                    "five_star_total_rating_count_by_role": combined_stats["five_star_total_rating_count_by_role"],
+                    "five_star_ratings_average": combined_stats.five_star_ratings_average,
+                    "five_star_total_rating_count_by_role": combined_stats.five_star_total_rating_count_by_role,
                 },
             },
             "partner": {
                 "profile": {
-                    "id": partner_profile["id"],
-                    "name": partner_profile["name"],
-                    "profile_picture_url": partner_profile["profile_picture_url"],
+                    "id": partner.profile.id if partner and partner.profile else None,
+                    "name": partner.profile.name if partner and partner.profile else None,
+                    "profile_picture_url": partner.profile.profile_picture_url if partner and partner.profile else None,
                 },
-                "partner_brand_name": partner["partner_brand_name"],
-                "seller_review_count": partner["seller_review_count"],
-                "seller_positive_ratings_pct": partner["seller_positive_ratings_pct"],
-                "seller_member_since": partner["seller_member_since"],
-                "number_of_sold_listings": partner["number_of_sold_listings"],
-                "average_ship_time": partner["average_ship_time"],
+                "partner_brand_name": partner.partner_brand_name if partner else None,
+                "seller_review_count": partner.seller_review_count if partner else None,
+                "seller_positive_ratings_pct": partner.seller_positive_ratings_pct if partner else None,
+                "seller_member_since": partner.seller_member_since if partner else None,
+                "number_of_sold_listings": partner.number_of_sold_listings if partner else None,
+                "average_ship_time": partner.average_ship_time if partner else None,
             },
-            "shipping_cost_text": listing["shipping_cost_text"],
-            "has_shipping_cost": listing["has_shipping_cost"],
-            "delivery_window_text": listing["delivery_window_text"],
-            "product_details_page_uri": listing["product_details_page_uri"],
-            "attributes": [
-                {
-                    "name": a["name"],
-                    "value": a["value"],
-                }
-                for a in listing["attributes"]
-            ],
-            "delivery_types": listing["delivery_types"],
-            "is_shipping_offered": listing["is_shipping_offered"],
-            "is_buy_now_enabled": listing["is_buy_now_enabled"],
-            "is_checkout_enabled": listing["is_checkout_enabled"],
-            "is_cart_enabled": listing["is_cart_enabled"],
-            "is_purchase_protected": listing["is_purchase_protected"],
-            "inventory_count": listing["inventory_count"],
-            "messaging_enabled": listing["messaging_enabled"],
-            "created_with_seller_app": listing["created_with_seller_app"],
-            "product_details_type": listing["product_details_type"],
+            "shipping_cost_text": listing.shipping_cost_text,
+            "has_shipping_cost": listing.has_shipping_cost,
+            "delivery_window_text": listing.delivery_window_text,
+            "product_details_page_uri": listing.product_details_page_uri,
+            "attributes": [{"name": a.name, "value": a.value} for a in listing.attributes],
+            "delivery_types": listing.delivery_types,
+            "is_shipping_offered": listing.is_shipping_offered,
+            "is_buy_now_enabled": listing.is_buy_now_enabled,
+            "is_checkout_enabled": listing.is_checkout_enabled,
+            "is_cart_enabled": listing.is_cart_enabled,
+            "is_purchase_protected": listing.is_purchase_protected,
+            "inventory_count": listing.inventory_count,
+            "messaging_enabled": listing.messaging_enabled,
+            "created_with_seller_app": listing.created_with_seller_app,
+            "product_details_type": listing.product_details_type,
             "photos": [
-                {
-                    "id": p["id"],
-                    "image_url": p["image_url"],
-                }
-                for p in parsed_marketplace_pdp_media_graphql["parsed_data"]["media"]["photos"]
+                {"id": p.id, "image_url": p.image_url}
+                for p in (media.photos if media else [])
             ],
             "videos": [
-                {
-                    "id": v["id"],
-                    "thumbnail_image_url": v["thumbnail_image_url"],
-                    "video_url": v["playable_url_hd"] if v["playable_url_hd"] is not None else v["playable_url"]
-                }
-                for v in parsed_marketplace_pdp_media_graphql["parsed_data"]["media"]["videos"]
+                {"id": v.id, "thumbnail_image_url": v.thumbnail_image_url, "video_url": v.video_url}
+                for v in (media.videos if media else [])
             ],
-        }
-
-        self._data.update(market_listing_data)
+        })
         self._full_fetched = True
 
     # ---------- identity ----------
@@ -3668,7 +3480,7 @@ class SearchEngine:
     @overload
     def search(
         self, text: str, filter_type: Literal["post"], exact_match: bool = ...
-    ) -> PaginatedIterator[Post]: ...
+    ) -> PaginatedIterator[PostBase]: ...
     @overload
     def search(
         self, text: str, filter_type: Literal["group"], exact_match: bool = ...
@@ -3676,7 +3488,7 @@ class SearchEngine:
     @overload
     def search(
         self, text: str, filter_type: Literal["all"] = ..., exact_match: bool = ...
-    ) -> PaginatedIterator[Profile | Post | Group]: ...
+    ) -> PaginatedIterator[Profile | PostBase | Group]: ...
 
     def search(self, text, filter_type="all", exact_match=False):
         """
@@ -3689,7 +3501,8 @@ class SearchEngine:
         :type filter_type: str
         :param exact_match: Whether to return only exact matches.
         :type exact_match: bool
-        :return: Iterator yielding Profile, Post, or Group objects.
+        :return: Iterator yielding :class:`Profile`, :class:`Post`,
+            :class:`MediaPost`, or :class:`Group` objects.
         :rtype: PaginatedIterator
         """
 
@@ -3702,60 +3515,35 @@ class SearchEngine:
                 exact_match=exact_match,
                 cursor=cursor,
             ).text
-
+        
         def page_wrapper(parsed):
+            page: ParserSearchResults = parsed.parsed_data
             raw = []
-            for p in parsed["parsed_data"]["profiles"]:
-                raw.append(
-                    {
-                        "type": "profile",
-                        "data": {
-                            "id": p["id"],
-                            "name": p["name"],
-                            "url": p["url"],
-                            "profile_picture_url": p["profile_picture_url"],
-                            "is_verified": p["is_verified"],
-                        },
-                    },
-                )
-            for p in parsed["parsed_data"]["posts"]:
-                raw.append(
-                    {
-                        "type": "post",
-                        "data": {
-                            "id": p["id"],
-                            "creation_time": p["creation_time"],
-                            "url": p["url"],
-                            "author": {
-                                "type": p["author"]["type"],
-                                "id": p["author"]["id"],
-                                "name": p["author"]["name"],
-                                "url": p["author"]["url"],
-                            },
-                        },
-                    }
-                )
-            for g in parsed["parsed_data"]["groups"]:
-                raw.append(
-                    {
-                        "type": "group",
-                        "data": {
-                            "id": g["id"],
-                            "name": g["name"],
-                            "url": g["url"],
-                            "profile_picture_url": g["profile_picture_url"],
-                        },
-                    }
-                )
-            return raw, parsed["parsed_data"]["page_info"]
+
+            for p in page.profiles:
+                raw.append(("profile", p.model_dump(exclude_none=True)))
+
+            for p in page.posts:
+                raw.append((p.type, p.model_dump(exclude_none=True)))   # "post" or "media_post"
+
+            for g in page.groups:
+                raw.append(("group", g.model_dump(exclude_none=True)))
+
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw, page_info
 
         def item_wrapper(raw):
-            if raw["type"] == "profile":
-                return Profile(self._context, raw["data"])
-            if raw["type"] == "post":
-                return Post(self._context, raw["data"])
-            if raw["type"] == "group":
-                return Group(self._context, raw["data"])
+            kind, data = raw
+            if kind == "profile":
+                return Profile(self._context, data)
+            if kind == "media_post":
+                return MediaPost(self._context, data)
+            if kind == "post":
+                return Post(self._context, data)
+            return Group(self._context, data)
 
         return PaginatedIterator(
             request_fn=request_fn,
@@ -3814,7 +3602,7 @@ class SearchEngine:
             ``"PRICE_DESCEND"``, ``"PRICE_ASCEND"``, ``"DISTANCE_ASCEND"``.
         :type sort_by: str or None
         :return: Iterator yielding :class:`MarketplaceListing` objects.
-        :rtype: PaginatedIterator
+        :rtype: PaginatedIterator[MarketplaceListing]
         """
         marketplace_search_graphql = CometMarketplaceSearchContentPaginationQueryGraphQL(
             self._context
@@ -3836,45 +3624,11 @@ class SearchEngine:
             ).text
 
         def page_wrapper(parsed):
-
-            raw_items = [
-                {
-                    "id": listing["id"],
-                    "title": listing["title"],
-                    "category_id": listing["category_id"],
-                    "currency": listing["currency"],
-                    "price": listing["price"],
-                    "strikethrough_price": listing["strikethrough_price"],
-                    "location_text": f"{listing['location']['city']}, {listing['location']['state']}",
-                    "is_hidden": listing["is_hidden"],
-                    "is_live": listing["is_live"],
-                    "is_pending": listing["is_pending"],
-                    "is_sold": listing["is_sold"],
-                    "created_with_seller_app": listing["created_with_seller_app"],
-                    "delivery_types": listing["delivery_types"],
-                    "seller": {
-                        "profile": {
-                            "id": listing["seller"]["profile"]["id"],
-                            "name": listing["seller"]["profile"]["name"],
-                        },
-                    },
-                    "photos": [
-                        {
-                            "id": listing["listing_photo"]["id"],
-                            "image_url": listing["listing_photo"]["image_url"],
-                        }
-                    ]
-                    if listing["listing_photo"]
-                    else [],
-                    "videos": [{"id": listing["video"]["id"]}]
-                    if listing["video"]
-                    else [],
-                }
-                for listing in parsed["parsed_data"]["listings"]
-            ]
+            page: ParserMarketplaceSearchPage = parsed.parsed_data
+            raw_items = [listing.model_dump(exclude_none=True) for listing in page.listings]
             page_info = {
-                "has_next_page": parsed["parsed_data"]["page_info"]["has_next_page"],
-                "end_cursor": parsed["parsed_data"]["page_info"]["end_cursor"],
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
             }
             return raw_items, page_info
 

@@ -15,11 +15,10 @@ A Facebook video (aka reel), attached to a post, comment, or listing.
 
 <Props>
   <Prop name="id" type="str | None">Unique identifier of the video.</Prop>
-  <Prop name="length_in_second" type="int | None">Duration of the video in seconds.</Prop>
-  <Prop name="created_time" type="int | None">Unix timestamp of when the video was created.</Prop>
+  <Prop name="length_in_second" type="float | None">Duration of the video in seconds.</Prop>
+  <Prop name="creation_time" type="int | None">Unix timestamp of when the video was created.</Prop>
   <Prop name="thumbnail_image_url" type="str | None">URL of the video's thumbnail image.</Prop>
   <Prop name="video_url" type="str | None">Direct URL of the video.</Prop>
-  <Prop name="url" type="str | None">Facebook URL of the video.</Prop>
-  <Prop name="play_count" type="int | None">Number of times the video has been played.</Prop>
+  <Prop name="play_count" type="str | None">Number of times the video has been played.</Prop>
   <Prop name="fallback_image_url" type="str | None">Fallback image URL used when the thumbnail is unavailable.</Prop>
 </Props>

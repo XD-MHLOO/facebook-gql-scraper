@@ -1,337 +1,229 @@
 import json
 import base64
+from pydantic import BaseModel
+from typing import Optional, List
 
 import iso4217parse
 from price_parser import Price
 
+from .parserModels import *
 # Fixed schema keys grouped by tab name
 FIXED_TABS_SCHEMA = {
     "About": [
-        "directory_basic_info",
-        "directory_specialties",
-        "directory_intro",
-        "directory_category",
-        "directory_personal_details",
-        "directory_links",
-        "directory_communities",
-        "directory_offers",
-        "directory_work",
-        "directory_education",
-        "directory_activites",
-        "directory_interests",
-        "directory_travel",
-        "directory_contact_info",
-        "directory_privacy_and_legal_info",
-        "directory_names",
+        "directory_basic_info", "directory_specialties", "directory_intro",
+        "directory_category", "directory_personal_details", "directory_links",
+        "directory_communities", "directory_offers", "directory_work",
+        "directory_education", "directory_activites", "directory_interests",
+        "directory_travel", "directory_contact_info",
+        "directory_privacy_and_legal_info", "directory_names",
     ],
     "Followers": [
-        "followers",
-        "followers_mutual",
-        "following",
-        "following_mutual",
-        "friends_all",
-        "friends_mutual",
+        "followers", "followers_mutual", "following", "following_mutual",
+        "friends_all", "friends_mutual",
     ],
     "Friends": [
-        "friends_all",
-        "friends_mutual",
-        "friends_recent",
-        "friends_with_upcoming_birthdays",
-        "friends_work",
-        "friends_college",
-        "friends_high_school",
-        "friends_current_city",
-        "friends_hometown",
-        "followers",
-        "following",
-        "followers_mutual",
-        "following_mutual",
+        "friends_all", "friends_mutual", "friends_recent",
+        "friends_with_upcoming_birthdays", "friends_work", "friends_college",
+        "friends_high_school", "friends_current_city", "friends_hometown",
+        "followers", "following", "followers_mutual", "following_mutual",
     ],
-    "Photos": [
-        "photos_by",
-        "photos_albums",
-        "photos_of",
-    ],
+    "Photos": ["photos_by", "photos_albums", "photos_of"],
     "Reels": ["owner_reels"],
 }
 
+###############
+def _parse_comment_attachments(attachments: list) -> list[ParserMedia]:
+    out: list[ParserMedia] = []
+    for att in attachments or []:
+        node = att.get("style_type_renderer") or {}
+        inner = node.get("attachment") or {}
+        # normalize the path so _parse_node_media sees the GraphQL shape
+        media = _parse_node_media({
+            "media": inner.get("media"),
+            "style_type_renderer": node,
+            "story_attachment_link_renderer": inner.get("story_attachment_link_renderer"),
+        })
+        if media is not None:
+            out.append(media)
+    return out
 
-def _parse_comment_attachments(attachments):
+# ---------- ParserMedia -> ParserMediaPost ----------
+
+def _wrap_media_post(
+    media: ParserMedia,
+    parent_post_id: Optional[str],
+    *,
+    url: Optional[str] = None,
+    creation_time: Optional[int] = None,
+    text: Optional[str] = None,
+    author: Optional[ParserProfileRef] = None,
+    reaction_count: Optional[int] = None,
+    reactors_visible: Optional[bool] = None,
+    comments_count: Optional[int] = None,
+    share_count: Optional[int] = None,
+    group_id: Optional[str] = None,
+) -> ParserMediaPost:
+    """Wrap a ParserMedia in a ParserMediaPost."""
+    return ParserMediaPost(
+        id=media.id or "",
+        media=media,                       # NOTE: only Photo/Video are allowed by ParserMediaPost
+        parent_post_id=parent_post_id,
+        url=url,
+        creation_time=creation_time or getattr(media, "creation_time", None),
+        text=text,
+        author=author,
+        reaction_count=reaction_count,
+        reactors_visible=reactors_visible,
+        comments_count=comments_count,
+        share_count=share_count,
+        group_id=group_id,
+    )
+
+
+# ---------- GraphQL node -> ParserMedia model ----------
+
+def _parse_node_media(node: dict) -> Optional[ParserMedia]:
+    """Convert one GraphQL attachment node into a ParserMedia model.
+
+    Handles photo, video (both lightweight and grid renderers), animated
+    image, external link, and sticker. Returns None for unknown types.
     """
-    Parse the `attachments` list on a comment / reply.
-    Returns a list of normalized attachment dicts (photo / video / sticker / genericMedia).
-    """
-    result = []
-    for attachment in attachments:
-        inner_attachment = attachment.get("style_type_renderer", {}).get(
-            "attachment", {}
+    if not node:
+        return None
+
+    media = node.get("media")
+    if media is None:
+        return None
+
+    typename = media.get("__typename")
+
+    if typename == "Photo":
+        image_url = (
+            (media.get("image") or {}).get("uri")
+            or (media.get("photo_image") or {}).get("uri")
         )
-        attachment_type = inner_attachment.get("media", {}).get("__typename", "")
+        return ParserPhotoMedia(
+            id=media.get("id"),
+            image_url=image_url,
+            creation_time=media.get("created_time"),
+        )
 
-        if attachment_type == "Photo":
-            result.append(
-                {
-                    "type": "photo",
-                    "id": inner_attachment.get("media", {}).get("id", None),
-                    "image_url": (
-                        inner_attachment.get("media", {})
-                        .get("image", {})
-                        .get("uri", None)
-                    ),
-                    "url": inner_attachment.get("url", None),
-                }
+    if typename == "Video":
+        video = (media.get("video_grid_renderer") or {}).get("video") or media
+
+        video_url = None
+        for item in (
+            (video.get("videoDeliveryResponseFragment") or {})
+            .get("videoDeliveryResponseResult", {})
+            .get("progressive_urls", [])
+        ):
+            if item.get("failure_reason") is None:
+                video_url = item.get("progressive_url")
+                break
+
+        thumb = (
+            (video.get("preferred_thumbnail") or {}).get("image", {}).get("uri")
+            or (media.get("preferred_thumbnail") or {}).get("image", {}).get("uri")
+        )
+
+        if video.get("playable_duration_in_ms"):
+            length = round(video["playable_duration_in_ms"] / 1000, 1)
+        else:
+            length = media.get("length_in_second")
+
+        return ParserVideoMedia(
+            id=media.get("id"),
+            video_url=video_url,
+            thumbnail_image_url=thumb,
+            length_in_second=length,
+            creation_time=media.get("created_time"),
+        )
+
+    if typename == "GenericAttachmentMedia":
+        renderer = (node.get("style_type_renderer") or {}).get("__typename")
+        if renderer == "StoryAttachmentAnimatedImageShareStyleRenderer":
+            return ParserAnimatedImage(
+                id=media.get("id"),
+                image_url=(media.get("image") or {}).get("uri"),
+                genericMedia_url=(media.get("animated_image") or {}).get("uri"),
+                animated_image_attribution=media.get("animated_image_attribution"),
             )
+        # external link share
+        web_link = (
+            ((node.get("story_attachment_link_renderer") or {})
+             .get("attachment") or {})
+            .get("web_link", {}).get("url")
+        )
+        return ParserExternalLink(id=media.get("id"), web_link=web_link)
 
-        elif attachment_type == "Video":
-            result.append(
-                {
-                    "type": "video",
-                    "id": inner_attachment.get("media", {}).get("id", None),
-                    "fallback_image_url": (
-                        inner_attachment.get("media", {})
-                        .get("fallback_image", {})
-                        .get("uri", None)
-                    ),
-                    "url": inner_attachment.get("url", None),
-                }
+    if typename == "Sticker":
+        return ParserStickerMedia(
+            id=media.get("id"),
+            label=media.get("label"),
+            image_url=(media.get("image") or {}).get("uri"),
+        )
+
+    return None
+
+
+def _parse_post_attachments(attachments: list) -> tuple[list[ParserMediaPost], list[ParserMedia], int]:
+    """Return (media_posts, non_media_attachments, media_posts_count)."""
+    media_posts: list[ParserMediaPost] = []
+    non_media_post: list[ParserMedia] = []
+    count = 0
+
+    for att in attachments or []:
+        styles = att.get("styles") or {}
+        style_type = styles.get("__typename")
+
+        if style_type in (
+            "StoryAttachmentAlbumStyleRenderer",
+            "StoryAttachmentAlbumFrameStyleRenderer",
+        ):
+            sub = (
+                (styles.get("attachment") or {}).get("all_subattachments")
+                or (styles.get("attachment") or {}).get("frame_sublayout_subattachments")
+                or {}
             )
+            count += sub.get("count") or 0
+            for node in sub.get("nodes", []):
+                media = _parse_node_media(node)
+                _dispatch(media, media_posts, non_media_post)
 
-        elif attachment_type == "Sticker":
-            sticker = {
-                "type": "sticker",
-                "id": inner_attachment.get("media", {}).get("id", None),
-                "label": inner_attachment.get("media", {}).get("label", None),
-                "image_url": (
-                    inner_attachment.get("media", {}).get("image", {}).get("uri", None)
-                ),
-            }
-            pack = inner_attachment.get("media", {}).get("pack", None)
-            if pack is not None:
-                sticker["pack"] = {
-                    "id": pack.get("id", None),
-                    "name": pack.get("name", None),
-                }
-            result.append(sticker)
-
-        elif attachment_type == "GenericAttachmentMedia":
-            # Most likely a GIF
-            if (
-                attachment.get("style_type_renderer", {}).get("__typename", "")
-                == "StoryAttachmentAnimatedImageShareStyleRenderer"
-            ):
-                result.append(
-                    {
-                        "type": "genericMedia",
-                        "id": inner_attachment.get("media", {}).get("id", None),
-                        "image_url": (
-                            inner_attachment.get("media", {})
-                            .get("image", {})
-                            .get("uri", None)
-                        ),
-                        "genericMedia_url": (
-                            inner_attachment.get("media").get("animated_image") or {}
-                        ).get("uri", None),
-                        "animated_image_attribution": inner_attachment.get(
-                            "media", {}
-                        ).get("animated_image_attribution", None),
-                    }
-                )
-
-        # else:
-        #     print(f"Uncaught Attachment Type: {attachment_type}")
-
-    return result
-
-
-def _parse_post_attachments(attachments):
-    """
-    Parse the `attachments` list on a post (album or single item).
-    Returns a list of normalized attachment dicts (photo / video / genericMedia).
-    """
-    result = []
-    for att in attachments:
-        # Check if album, or Single Item
-        if "__typename" not in att.get("styles", {}):
-            continue
-        style_type = att.get("styles", {}).get("__typename", "")
-
-        if style_type == "StoryAttachmentAlbumStyleRenderer":
-            for subattachment_node in (
-                att.get("styles", {})
-                .get("attachment", {})
-                .get("all_subattachments", {})
-                .get("nodes", [])
-            ):
-                subattachment_type = subattachment_node.get("media", {}).get(
-                    "__typename", ""
-                )
-
-                if subattachment_type == "Video":
-                    video_url = None
-                    for item in (
-                        subattachment_node.get("media", {})
-                        .get("video_grid_renderer", {})
-                        .get("video", {})
-                        .get("videoDeliveryResponseFragment", {})
-                        .get("videoDeliveryResponseResult", {})
-                        .get("progressive_urls", [])
-                    ):
-                        # loop and get the last one, the best one
-                        if item.get("failure_reason") is None:
-                            video_url = item.get("progressive_url", None)
-
-                    result.append(
-                        {
-                            "type": "video",
-                            "id": subattachment_node.get("media", {}).get("id", None),
-                            "thumbnail_image_url": (
-                                subattachment_node.get("media", {})
-                                .get("video_grid_renderer", {})
-                                .get("video", {})
-                                .get("preferred_thumbnail", {})
-                                .get("image", {})
-                                .get("uri", None)
-                            ),
-                            "video_url": video_url,
-                            "url": subattachment_node.get("url", None),
-                        }
-                    )
-                elif subattachment_type == "Photo":
-                    result.append(
-                        {
-                            "type": "photo",
-                            "id": subattachment_node.get("media", {}).get("id", None),
-                            "image_url": (
-                                subattachment_node.get("media", {})
-                                .get("image", {})
-                                .get("uri", None)
-                            ),
-                            "url": subattachment_node.get("url", None),
-                        }
-                    )
-                # else:
-                #     print(f"Uncaught SubAttachment Type: {subattachment_type}")
+        elif style_type == "StoryAttachmentFBReelsStyleRenderer":
+            for info in (styles.get("attachment") or {}).get("style_infos", []):
+                for inner in (info.get("fb_shorts_story") or {}).get("attachments", []) or []:
+                    before = len(media_posts)
+                    media = _parse_node_media(inner)
+                    _dispatch(media, media_posts, non_media_post)
+                    count += len(media_posts) - before
 
         else:
-            style_type = (
-                att.get("styles", {})
-                .get("attachment", {})
-                .get("media", {})
-                .get("__typename", "")
-            )
-            if style_type == "Photo":
-                result.append(
-                    {
-                        "type": "photo",
-                        "id": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("id", None)
-                        ),
-                        "image_url": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("photo_image", {})
-                            .get("uri", None)
-                        ),
-                        "url": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("url", None)
-                        ),
-                    }
-                )
+            before = len(media_posts)
+            media = _parse_node_media(styles.get("attachment") or {})
+            _dispatch(media, media_posts, non_media_post)
+            count += len(media_posts) - before
 
-            elif style_type == "Video":
-                video_url = None
-                for item in (
-                    att.get("styles", {})
-                    .get("attachment", {})
-                    .get("media", {})
-                    .get("videoDeliveryResponseFragment", {})
-                    .get("videoDeliveryResponseResult", {})
-                    .get("progressive_urls", [])
-                ):
-                    # loop and get the last one, the best one
-                    if item.get("failure_reason") is None:
-                        video_url = item.get("progressive_url", None)
+    return media_posts, non_media_post, count
 
-                result.append(
-                    {
-                        "type": "video",
-                        "id": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("id", None)
-                        ),
-                        "length_in_second": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("length_in_second", None)
-                        ),
-                        "thumbnail_image_url": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("preferred_thumbnail", {})
-                            .get("image", {})
-                            .get("uri", None)
-                        ),
-                        "video_url": video_url,
-                        "url": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("permalink_url", None)
-                        ),
-                    }
-                )
 
-            elif style_type == "GenericAttachmentMedia":
-                result.append(
-                    {
-                        "type": "genericMedia",
-                        "id": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("id", None)
-                        ),
-                        "image_url": (
-                            att.get("styles", {})
-                            .get("attachment", {})
-                            .get("media", {})
-                            .get("image", {})
-                            .get("uri", None)
-                        ),
-                        "genericMedia_url": (
-                            att.get("styles", {}).get("attachment", {}).get("url", None)
-                        ),
-                    }
-                )
-
-            # else:
-            #     print(f"Uncaught Attachment Type: {style_type}")
-
-    return result
-
+def _dispatch(media, media_posts, non_media):
+    if media is None:
+        return
+    if isinstance(media, (ParserPhotoMedia, ParserVideoMedia)):
+        media_posts.append(_wrap_media_post(media, parent_post_id=None))
+    else:
+        non_media.append(media)
 
 def _parse_reactions_from_ufi(target):
     """
-    Parse reactions + share_count from a feedback target.
+    Parse reaction count, display strategy, and share count from a feedback target.
 
-    `target` is the `feedback_target_with_context` dict.
-    Returns (reactions_dict, share_count).
+    Returns (reactions_dict, reaction_display_strategy, share_count).
     """
-    reactions = {"total": 0, "breakdown": []}
+    reactions = {"total": None, "breakdown": []}
     reaction_display_strategy = None
     share_count = None
-
     fb = target.get("comet_ufi_summary_and_actions_renderer", {}).get("feedback", {})
 
     # Total reaction count + share count
@@ -354,7 +246,7 @@ def _parse_reactions_from_ufi(target):
     for edge in fb.get("top_reactions", {}).get("edges", []):
         reaction_id = edge.get("node", {}).get("id")
         name = edge.get("node", {}).get("localized_name")
-        count = edge.get("reaction_count", 0)
+        count = edge.get("reaction_count", None)
         if name:
             reactions["breakdown"].append(
                 {"id": reaction_id, "name": name, "count": count}
@@ -375,17 +267,19 @@ def _get_comments_count(node):
         .get("feedback_target_with_context", {})
         .get("comment_rendering_instance", {})
         .get("comments", {})
-        .get("total_count", 0)
+        .get("total_count", None)
     )
 
 
-def _parse_feed_post(edge):
-    """Build a normalized post dict from a feed edge (user timeline or group feed)."""
+# ---------- feed post -> list[ParserFeedPost] ----------
+
+def _parse_feed_post(edge) -> list[ParserFeedPost]:
+    """Build a ParserPost from a feed edge (user timeline or group feed)."""
     node = edge.get("node", {})
 
     post_id = node.get("post_id")
     if not post_id:
-        return None
+        return []
 
     ufi_container = (
         node.get("comet_sections", {})
@@ -394,10 +288,25 @@ def _parse_feed_post(edge):
         .get("story_ufi_container", {})
         .get("story", {})
     )
+
+    shareable = ufi_container.get("shareable_from_perspective_of_feed_ufi") or {}
+    shareable_typename = shareable.get("__typename")
+    # "Photo" | "Video" | "Album" | "Story" | None
+
+    media_posts, non_media_post, media_posts_count = _parse_post_attachments(node.get("attachments", []))
+
+    # set parent_post_id on every wrapped media post
+    for mp in media_posts:
+        mp.parent_post_id = post_id
+        
+    if shareable_typename != "Story":
+        return media_posts
+
+
     target = ufi_container.get("feedback_context", {}).get(
         "feedback_target_with_context", {}
     )
-
+    
     reactions, reaction_display_strategy, share_count = _parse_reactions_from_ufi(
         target
     )
@@ -416,42 +325,36 @@ def _parse_feed_post(edge):
     if title is not None:
         title_text = title.get("text", None)
 
-    attachments_list = _parse_post_attachments(node.get("attachments", []))
-
     comet_story = node.get("comet_sections", {}).get("content", {}).get("story", {})
     text = None
     if comet_story.get("message", None) is not None:
         text = comet_story.get("message", {}).get("text", None)
 
-    return {
-        "type": "post",
-        "id": node.get("post_id", None),
-        "creation_time": node.get("creation_time", None),
-        "url": (
-            node.get("comet_sections", {})
-            .get("content", {})
-            .get("story", {})
-            .get("wwwURL", None)
-        ),
-        "author": {
-            "type": "profile",
-            "id": node.get("actors", [{}])[0].get("id", None),
-            "name": node.get("actors", [{}])[0].get("name", None),
-            "url": node.get("actors", [{}])[0].get("url", None),
-        },
-        "title": title_text,
-        "text": text,
-        "attachments": attachments_list,
-        "reactions": reactions,
-        "reactors_visible": reaction_display_strategy == "NONE"
-        if reaction_display_strategy
-        else None,
-        "share_count": share_count,
-        "comments_count": comments_count,
-    }
+    return [
+        ParserPost(
+            id=post_id,
+            creation_time=node.get("creation_time"),
+            url=(node.get("comet_sections", {}).get("content", {}).get("story", {}) or {}).get("wwwURL"),
+            author=ParserProfileRef(
+                id=(node.get("actors") or [{}])[0].get("id"),
+                name=(node.get("actors") or [{}])[0].get("name"),
+                url=(node.get("actors") or [{}])[0].get("url"),
+            ),
+            title=title_text,
+            text=text,
+            attachments=non_media_post,
+            reaction_count=reactions["total"],
+            reactors_visible=(reaction_display_strategy == "NONE") if reaction_display_strategy else None,
+            share_count=share_count,
+            comments_count=comments_count,
+            media_posts_count=media_posts_count,
+            media_posts=media_posts,
+        )
+    ]
 
 
-def _parse_timeline_feed(data, feed_key):
+
+def _parse_timeline_feed(data, feed_key) -> ParserTimelinePage:
     """
     Parse a feed of posts from a user timeline or group timeline.
     feed_key: "timeline_list_feed_units" (user) or "group_feed" (group).
@@ -473,42 +376,43 @@ def _parse_timeline_feed(data, feed_key):
             raw_page_info = info
             break
 
-    posts = []
+    feeds = []
     for edge in all_edges:
         if not edge:
             continue
         node = edge.get("node", {})
         if not node:
             continue
-        parsed = _parse_feed_post(edge)
-        if parsed is not None:
-            posts.append(parsed)
-    return {
-        "posts": posts,
-        "page_info": {
-            "type_cursor": "posts",
-            "end_cursor": raw_page_info.get("end_cursor"),
-            "has_next_page": raw_page_info.get("has_next_page", False),
-        },
-    }
+        feeds.extend(_parse_feed_post(edge))
 
 
-def _extract_group_from_view_model(vm):
+    return ParserTimelinePage(
+        feeds=feeds,
+        page_info=ParserPageInfo(
+            type_cursor="feeds",
+            end_cursor=raw_page_info.get("end_cursor"),
+            has_next_page=raw_page_info.get("has_next_page", False),
+        ),
+    )
+
+
+def _extract_group_from_view_model(vm) -> Optional[ParserGroup]:
     """Build a normalized group dict from a SearchProfileViewModel."""
     profile = vm.get("profile")
     if not profile or profile.get("__typename") != "Group":
         return None
 
-    return {
-        "type": "group",
-        "id": profile.get("id"),
-        "name": profile.get("name"),
-        "url": profile.get("url") or profile.get("profile_url"),
-        "profile_picture_url": profile.get("profile_picture", {}).get("uri"),
-    }
+    return ParserGroup(
+        id=profile.get("id"),
+        name=profile.get("name"),
+        url=profile.get("url") or profile.get("profile_url"),
+        profile_picture_url=profile.get("profile_picture", {}).get("uri"),
+    )
 
 
-def parse_profile_collection_ids(data: dict) -> dict:
+def parse_profile_collection_ids(data: dict) -> ParserProfileRef:
+    """Parse a profile header payload into a ParserProfileRef with tabs."""
+
     user = (
         data.get("data", {})
         .get("user", {})
@@ -527,7 +431,7 @@ def parse_profile_collection_ids(data: dict) -> dict:
     followees_count = None
     friends_count = None
 
-    for content in user.get("profile_social_context").get("content", []):
+    for content in (user.get("profile_social_context") or {}).get("content", []):
         text = content.get("text", {}).get("text")
         if text.endswith("friends"):
             friends_count = text.removesuffix("friends").strip()
@@ -535,21 +439,6 @@ def parse_profile_collection_ids(data: dict) -> dict:
             followers_count = text.removesuffix("followers").strip()
         if text.endswith("following"):
             followees_count = text.removesuffix("following").strip()
-
-    author_profile = {
-        "id": user.get("id", None),
-        "name": user.get("name", None),
-        "alternate_name": user.get("alternate_name", None),
-        "gender": user.get("gender", None),
-        "url": user.get("url", None),
-        "status_text": status_text,
-        "profile_picture_url": user.get("profilePicLarge", {}).get("uri", None),
-        "is_verified": user.get("show_verified_badge_on_profile", None),
-        "followers_count": followers_count,
-        "followees_count": followees_count,
-        "friends_count": friends_count,
-    }
-
     # Initialize Tab structure with default None for section ID and collections
     parsed_tabs = {
         tab_name: {"id": None, "collections": {col_key: None for col_key in keys}}
@@ -568,29 +457,40 @@ def parse_profile_collection_ids(data: dict) -> dict:
         tab_name = node.get("name")
 
         if tab_name in parsed_tabs:
-            # Extract Tab/Section ID
             parsed_tabs[tab_name]["id"] = node.get("id")
-
-            # Extract Collection IDs
             collections = node.get("all_collections", {}).get("nodes", [])
             for col in collections:
                 col_key = col.get("tab_key")
                 col_id = col.get("id")
                 if col_key in parsed_tabs[tab_name]["collections"]:
                     parsed_tabs[tab_name]["collections"][col_key] = col_id
-        #         else:
-        #             print(f"Uncaughted [{tab_name}] col_key: {col_key}")
-        # else:
-        #     print(f"Uncaughted Tab: {tab_name}")
-    return {"author_profile": author_profile, "tabs": parsed_tabs}
 
+    return ParserProfileRef(
+        id=user.get("id", None),
+        name=user.get("name", None),
+        alternate_name=user.get("alternate_name", None),
+        gender=user.get("gender", None),
+        url=user.get("url", None),
+        status_text=status_text,
+        profile_picture_url=user.get("profilePicLarge", {}).get("uri", None),
+        is_verified=user.get("show_verified_badge_on_profile", None),
+        followers_count=followers_count,
+        followees_count=followees_count,
+        friends_count=friends_count,
+        tabs=ParserProfileTabs(
+            About=ParserCollectionEntry(**parsed_tabs["About"]),
+            Followers=ParserCollectionEntry(**parsed_tabs["Followers"]),
+            Friends=ParserCollectionEntry(**parsed_tabs["Friends"]),
+            Photos=ParserCollectionEntry(**parsed_tabs["Photos"]),
+            Reels=ParserCollectionEntry(**parsed_tabs["Reels"]),
+        ),
+    )
 
-def parse_about_collections(data: dict) -> dict:
+def parse_about_collections(data: dict) -> ParserAboutCollection:
     """
     Extracts text contents specifically for 'About' tab section keys.
     """
-    # Initialize schema keys with default None values
-    about_data = {}
+    about_data: dict[str, ParserAboutSection] = {}
 
     about_nodes = (
         data.get("data", {})
@@ -607,27 +507,21 @@ def parse_about_collections(data: dict) -> dict:
             profile_field_sections = style_renderer.get("profile_field_sections", [])
 
             for field_sec in profile_field_sections:
-                result = {"category": None, "items": []}
+                result_items: List[ParserAboutItemEntry] = []
                 sec_type = field_sec.get("field_section_type")
-                result["category"] = field_sec.get("title", {}).get("text", None)
-                # Match against defined About section keys
-                # if sec_type in about_data:
-                profile_fields_nodes = field_sec.get("profile_fields", {}).get(
-                    "nodes", []
-                )
-                for node in profile_fields_nodes:
-                    result_item = {"title": None, "text": None, "item": []}
+                category = field_sec.get("title", {}).get("text", None)
 
-                    # 1. Primary title text extraction
+                profile_fields_nodes = field_sec.get("profile_fields", {}).get("nodes", [])
+                for node in profile_fields_nodes:
                     title_text = (
                         node.get("title", {}).get("text") if node.get("title") else None
                     )
-                    result_item["title"] = title_text
+                    text_value = None
+                    item_list: List[str] = []
+
                     for item in node.get("list_item_groups", []):
                         for subitem in item.get("list_items", []):
-                            result_item["item"].append(
-                                subitem.get("text").get("text", None)
-                            )
+                            item_list.append(subitem.get("text").get("text", None))
 
                     if node.get("renderer") is not None:
                         text_content = (
@@ -635,46 +529,45 @@ def parse_about_collections(data: dict) -> dict:
                             .get("field", {})
                             .get("text_content", None)
                         )
-
                         if text_content is not None:
-                            result_item["text"] = text_content.get("text", None)
+                            text_value = text_content.get("text", None)
 
-                        text_content2 = node.get("renderer", {}).get(
-                            "text_content", None
-                        )
+                        text_content2 = node.get("renderer", {}).get("text_content", None)
                         if text_content2 is not None:
-                            result_item["text"] = text_content2.get("text", None)
+                            text_value = text_content2.get("text", None)
 
-                        for travel_item in node.get("renderer", {}).get(
-                            "travel_profile_items", []
-                        ):
+                        for travel_item in node.get("renderer", {}).get("travel_profile_items", []):
                             travel_name = travel_item.get("page").get("name")
                             visit_time = travel_item.get("visit_time")
-                            result_item["item"].append(f"{travel_name}:{visit_time}")
+                            item_list.append(f"{travel_name}:{visit_time}")
 
-                        # for renderer_item in node.get("renderer", {}).get("field", {}).get("list_item_groups", []):
-                        #     if renderer_item.get("has_items") == True:
-                        #         for subrenderer_item in renderer_item.get("list_items", []):
-                        #             result_item["item"].append(subrenderer_item.get("text").get("text"))
+                    result_items.append(
+                        ParserAboutItemEntry(
+                            title=title_text,
+                            text=text_value,
+                            item=item_list,
+                        )
+                    )
 
-                    result["items"].append(result_item)
+                if sec_type is not None:
+                    about_data[sec_type] = ParserAboutSection(
+                        category=category,
+                        items=result_items,
+                    )
 
-                about_data[sec_type] = result
+    return ParserAboutCollection(**about_data)
 
-    return {"About": about_data}
-
-
-def parse_post(data):
+def parse_post(data) -> ParserPost:
+    """Parse a single-post dialog payload (`data.node_v2`) into a ParserPost."""
 
     # Navigate node_v2 directly via dictionary access
     node_v2 = data.get("data", {}).get("node_v2", {})
+    post_id= node_v2.get("post_id", None)
     comet_story = node_v2.get("comet_sections", {}).get("content", {}).get("story", {})
     comet_story_layout = (
         node_v2.get("comet_sections", {}).get("context_layout", {}).get("story", {})
     )
 
-    # Extract Comments
-    comments_list = []
     ufi_container = (
         node_v2.get("comet_sections", {})
         .get("feedback", {})
@@ -685,6 +578,7 @@ def parse_post(data):
     target = ufi_container.get("feedback_context", {}).get(
         "feedback_target_with_context", {}
     )
+
     comment_data = (
         target.get("comment_list_renderer", {})
         .get("feedback", {})
@@ -692,60 +586,15 @@ def parse_post(data):
         .get("comments", {})
     )
 
-    for edge in comment_data.get("edges", []):
-        c_node = edge.get("node", {})
-
-        decoded = base64.b64decode(c_node.get("id")).decode("utf-8")
-        post_id, comment_id = decoded.split(":")[-1].split("_", 1)
-
-        text = None
-        body = c_node.get("body", None)
-        if body:
-            text = body.get("text", None)
-
-        attachments = _parse_comment_attachments(c_node.get("attachments", []))
-
-        comments_list.append(
-            {
-                "type": "comment",
-                "id": comment_id,
-                "text": text,
-                "attachments": attachments,
-                "created_time": c_node.get("created_time", None),
-                "reaction_count": (
-                    c_node.get("feedback", {}).get("reactors", {}).get("count_reduced")
-                ),
-                "reply_count": (
-                    c_node.get("feedback", {})
-                    .get("replies_fields", {})
-                    .get("total_count", None)
-                ),
-                "reply_expansion_token": (
-                    c_node.get("feedback", {})
-                    .get("expansion_info", {})
-                    .get("expansion_token", None)
-                ),
-                "author": {
-                    "type": "profile",
-                    "id": c_node.get("author", {}).get("id", None),
-                    "name": c_node.get("author", {}).get("name", None),
-                    "gender": c_node.get("author", {}).get("gender", None),
-                    "url": c_node.get("author", {}).get("url", None),
-                    "profile_picture_url": (
-                        c_node.get("author", {})
-                        .get("profile_picture_depth_0", {})
-                        .get("uri", None)
-                    ),
-                },
-                "post_id": post_id,
-            }
-        )
-
     reactions, reaction_display_strategy, share_count = _parse_reactions_from_ufi(
         target
     )
 
-    attachments_list = _parse_post_attachments(node_v2.get("attachments", []))
+    media_posts, non_media_post, media_posts_count = _parse_post_attachments(node_v2.get("attachments", []))
+
+    # set parent_post_id on every wrapped media post
+    for mp in media_posts:
+        mp.parent_post_id = post_id
 
     title_text = None
     title = (
@@ -760,80 +609,40 @@ def parse_post(data):
     text = None
     if comet_story.get("message", None) is not None:
         text = comet_story.get("message", {}).get("text", None)
-    # Consolidated extracted data dict
-    parsed_post = {
-        "type": "post",
-        "id": node_v2.get("post_id", None),
-        "creation_time": node_v2.get("creation_time", None),
-        "url": comet_story.get("wwwURL", None),
-        "author": {
-            "type": "profile",
-            "id": comet_story.get("actors", [{}])[0].get("id", None),
-            "name": comet_story.get("actors", [{}])[0].get("name", None),
-            "url": comet_story.get("actors", [{}])[0].get("url", None),
-            "profile_picture_url": (
+
+    group_id = None
+    associated_group = node_v2.get("feedback").get("associated_group")
+    if associated_group is not None:
+        group_id=associated_group.get("id")
+
+    return ParserPost(
+        id=post_id,
+        creation_time=node_v2.get("creation_time", None),
+        url=comet_story.get("wwwURL", None),
+        author=ParserProfileRef(
+            id=comet_story.get("actors", [{}])[0].get("id", None),
+            name=comet_story.get("actors", [{}])[0].get("name", None),
+            url=comet_story.get("actors", [{}])[0].get("url", None),
+            profile_picture_url=(
                 comet_story.get("actors", [{}])[0]
                 .get("profile_picture", {})
                 .get("uri", None)
             ),
-        },
-        "title": title_text,
-        "text": text,
-        "attachments": attachments_list,
-        "reactions": reactions,
-        "reactors_visible": reaction_display_strategy == "NONE"
-        if reaction_display_strategy
-        else None,
-        "share_count": share_count,
-        "comments_count": comment_data.get("total_count", None),
-        "comments": comments_list,
-    }
+        ),
+        title=title_text,
+        text=text,
+        attachments=non_media_post,
+        reaction_count=reactions["total"],
+        reactors_visible=(reaction_display_strategy == "NONE") if reaction_display_strategy else None,
+        share_count=share_count,
+        comments_count=comment_data.get("total_count", None),
+        media_posts_count=media_posts_count,
+        media_posts=media_posts,
+        group_id=group_id
+    )
 
-    return {
-        "post": parsed_post,
-        "page_info": {
-            "type_cursor": "comments",
-            "end_cursor": comment_data.get("page_info", {}).get("end_cursor"),
-            "has_next_page": comment_data.get("page_info", {}).get(
-                "has_next_page", False
-            ),
-            "has_previous_page": comment_data.get("page_info", {}).get(
-                "has_previous_page", False
-            ),
-            "start_cursor": comment_data.get("page_info", {}).get("start_cursor"),
-        },
-    }
-
-
-def parse_post_reactors_partial(data):
-
-    feedback = data.get("data", {}).get("feedback", {})
-
-    # Extract Base64 feedback ID and decode post ID
-    raw_id = feedback.get("id", "")
-    post_id = None
-    if raw_id:
-        decoded = base64.b64decode(raw_id).decode("utf-8")
-        post_id = decoded.split(":")[-1]
-
-
-    # Parse individual reactor list
-    reactors_data = feedback.get("reactors", {})
-    reactors_list = [
-        {"id": node.get("id"), "name": node.get("name")}
-        for node in reactors_data.get("nodes", [])
-    ]
-
-    return {
-        "post_id": post_id,
-        "feedback_id": raw_id,
-        "total_reactions": feedback.get("total_reaction_count", {}).get("count", 0),
-        "sample_reactors_count": reactors_data.get("count", 0),
-        "reactors": reactors_list,
-    }
-
-
-def parse_reactors(data):
+def parse_reactors(data) -> ParserReactorsPage:
+    """Parse a reactors list response into a ParserReactorsPage."""
 
     node = data.get("data", {}).get("node", {})
     decoded = base64.b64decode(node.get("id")).decode("utf-8")
@@ -854,44 +663,31 @@ def parse_reactors(data):
         user_node = edge.get("node", {})
 
         reactors.append(
-            {
-                "reaction_type_id": edge.get("feedback_reaction_info", {}).get(
-                    "id", None
+            ParserReactor(
+                reaction_type_id=edge.get("feedback_reaction_info", {}).get("id"),
+                author=ParserProfileRef(
+                    id=user_node.get("id"),
+                    name=user_node.get("name"),
+                    url=user_node.get("profile_url"),
+                    profile_picture_url=(user_node.get("profile_picture") or {}).get("uri"),
                 ),
-                "author": {
-                    "type": "profile",
-                    "id": user_node.get("id", None),
-                    "name": user_node.get("name", None),
-                    "url": user_node.get("profile_url", None),
-                    "profile_picture_url": user_node.get("profile_picture", {}).get(
-                        "uri", None
-                    ),
-                },
-            }
+            )
         )
 
-    result = {
-        "post_id": post_id,
-        "reactors": reactors,
-        "page_info": {
-            "type_cursor": "reactors",
-            "has_next_page": raw_page_info.get("has_next_page", False),
-            "end_cursor": raw_page_info.get("end_cursor"),
-        },
-    }
-
-    # Add comment_id only if it exists
-    if comment_id:
-        result["parent_comment"] = {"comment_id": comment_id}
-
-    return result
+    return ParserReactorsPage(
+        post_id=post_id,
+        reactors=reactors,
+        page_info=ParserPageInfo(
+            type_cursor="reactors",
+            has_next_page=raw_page_info.get("has_next_page", False),
+            end_cursor=raw_page_info.get("end_cursor"),
+        ),
+        parent_comment_id=comment_id,
+    )
 
 
-def parse_facebook_comments(data):
-    """
-    Parses a Facebook GraphQL response and returns a list of cleaned comment objects.
-    Accepts either a JSON string or a dictionary.
-    """
+def parse_facebook_comments(data) -> ParserCommentsPage:
+    """Parse a comments pagination payload into a ParserCommentsPage."""
 
     # Safely traverse nested structure to reach comments array
     comments_data = (
@@ -921,58 +717,36 @@ def parse_facebook_comments(data):
         attachments = _parse_comment_attachments(node.get("attachments", []))
 
         parsed_comments.append(
-            {
-                "type": "comment",
-                "id": comment_id,
-                "text": text,
-                "attachments": attachments,
-                "created_time": node.get("created_time", None),
-                "reaction_count": (
-                    node.get("feedback", {})
-                    .get("reactors", {})
-                    .get("count_reduced", None)
+            ParserComment(
+                id=comment_id,
+                text=text,
+                attachments=attachments,
+                creation_time=node.get("created_time"),
+                reaction_count=(node.get("feedback", {}).get("reactors") or {}).get("count_reduced"),
+                reply_count=(node.get("feedback", {}).get("replies_fields") or {}).get("total_count"),
+                reply_expansion_token=(node.get("feedback", {}).get("expansion_info") or {}).get("expansion_token"),
+                author=ParserProfileRef(
+                    id=author.get("id"),
+                    name=author.get("name"),
+                    gender=author.get("gender"),
+                    url=author.get("url"),
+                    profile_picture_url=(author.get("profile_picture_depth_0") or {}).get("uri"),
                 ),
-                "reply_count": (node.get("feedback", {}).get("replies_fields", {})).get(
-                    "total_count", None
-                ),
-                "reply_expansion_token": (
-                    node.get("feedback", {})
-                    .get("expansion_info", {})
-                    .get("expansion_token", None)
-                ),
-                "author": {
-                    "type": "profile",
-                    "id": author.get("id", None),
-                    "name": author.get("name", None),
-                    "gender": author.get("gender", None),
-                    "url": author.get("url", None),
-                    "profile_picture_url": author.get(
-                        "profile_picture_depth_0", {}
-                    ).get("uri", None),
-                },
-                "post_id": post_id,
-            }
+                post_id=post_id,
+            )
         )
-
-    return {
-        "comments": parsed_comments,
-        "page_info": {
-            "type_cursor": "comments",
-            "end_cursor": comments_data.get("page_info", {}).get("end_cursor", None),
-            "has_next_page": comments_data.get("page_info", {}).get(
-                "has_next_page", None
-            ),
-            "has_previous_page": comments_data.get("page_info", {}).get(
-                "has_previous_page", None
-            ),
-            "start_cursor": comments_data.get("page_info", {}).get(
-                "start_cursor", None
-            ),
-        },
-    }
+        
+    return ParserCommentsPage(
+        comments=parsed_comments,
+        page_info=ParserPageInfo(
+            type_cursor="comments",
+            end_cursor=comments_data.get("page_info", {}).get("end_cursor"),
+            has_next_page=comments_data.get("page_info", {}).get("has_next_page", False),
+        ),
+    )
 
 
-def parse_comment_replies(data, comment_type="reply"):
+def parse_comment_replies(data, comment_type="reply") -> ParserRepliesPage:
     """
     Parses comment replies payload from Facebook GraphQL response,
     including pagination cursor metadata.
@@ -1004,160 +778,65 @@ def parse_comment_replies(data, comment_type="reply"):
         if body:
             text = body.get("text", None)
 
-        attachments = _parse_comment_attachments(reply_node.get("attachments", []))
+        attachments = _parse_comment_attachments(node.get("attachments", []))
 
-        comment = {
-            "type": "comment",
-            "id": comment_id,
-            "text": text,
-            "attachments": attachments,
-            "created_time": reply_node.get("created_time", None),
-            "reaction_count": (
+        comment = ParserComment(
+            id=comment_id,
+            text=text,
+            attachments=attachments,
+            creation_time=reply_node.get("created_time"),
+            reaction_count=(
                 reply_node.get("feedback", {})
                 .get("reactors", {})
-                .get("count_reduced", None)
+                .get("count_reduced")
             ),
-            "author": {
-                "type": "profile",
-                "id": reply_node.get("author", {}).get("id", None),
-                "name": reply_node.get("author", {}).get("name", None),
-                "gender": reply_node.get("author", {}).get("gender", None),
-                "url": reply_node.get("author", {}).get("url", None),
-                "profile_picture_url": (
+            author=ParserProfileRef(
+                id=reply_node.get("author", {}).get("id"),
+                name=reply_node.get("author", {}).get("name"),
+                gender=reply_node.get("author", {}).get("gender"),
+                url=reply_node.get("author", {}).get("url"),
+                profile_picture_url=(
                     reply_node.get("author", {})
                     .get("profile_picture_depth_0", {})
-                    .get("uri", None)
+                    .get("uri")
                 ),
-            },
-            "parent_comment": {
-                "comment_id": parent_comment_id,
-                "author": {
-                    "type": "profile",
-                    "name": comment_direct_parent.get("author", {}).get("name", None),
-                    "gender": comment_direct_parent.get("author", {}).get(
-                        "gender", None
-                    ),
-                },
-            },
-            "post_id": post_id,
-        }
+            ),
+            parent_comment=ParserComment(
+                id=parent_comment_id,
+                author=ParserProfileRef(
+                    name=comment_direct_parent.get("author", {}).get("name"),
+                    gender=comment_direct_parent.get("author", {}).get("gender"),
+                ),
+            ),
+            post_id=post_id,
+        )
 
         if comment_type == "reply":
-            comment["reply_count"] = (
+            comment.reply_count = (
                 reply_node.get("feedback", {})
                 .get("replies_fields", {})
-                .get("total_count", None)
+                .get("total_count")
             )
-            comment["reply_expansion_token"] = (
+            comment.reply_expansion_token = (
                 reply_node.get("feedback", {})
                 .get("expansion_info", {})
-                .get("expansion_token", None)
+                .get("expansion_token")
             )
 
         parsed_replies.append(comment)
 
-    return {
-        "replies": parsed_replies,
-        "page_info": {
-            "type_cursor": "comment_replies",
-            "end_cursor": replies_conn.get("page_info", {}).get("end_cursor"),
-            "has_next_page": replies_conn.get("page_info", {}).get(
-                "has_next_page", False
-            ),
-            "has_previous_page": replies_conn.get("page_info", {}).get(
-                "has_previous_page", False
-            ),
-            "start_cursor": replies_conn.get("page_info", {}).get("start_cursor"),
-        },
-    }
-
-
-def parse_comment_reactors_partial(data):
-
-    feedback = data.get("data", {}).get("feedback", {})
-    raw_id = feedback.get("id")
-
-    feedback_id = base64.b64decode(raw_id).decode("utf-8")[-1]
-
-    # Split decoded feedback ID into post_id and comment_id if both exist
-    post_id, comment_id = None, None
-    if feedback_id and "_" in feedback_id:
-        post_id, comment_id = feedback_id.split("_", 1)
-    else:
-        post_id = feedback_id
-
-    summary_list = feedback.get("top_reactions", {}).get("summary", [])
-    reactions_summary = []
-
-    for item in summary_list:
-        reactors = [
-            {
-                "id": reactor.get("id"),
-                "name": reactor.get("name"),
-                "typename": reactor.get("__typename"),
-            }
-            for reactor in item.get("interesting_reactors", [])
-        ]
-
-        reactions_summary.append(
-            {
-                "reaction_id": item.get("reaction", {}).get("id"),
-                "count": item.get("reaction_count"),
-                "count_reduced": item.get("reaction_count_reduced"),
-                "reactors": reactors,
-            }
-        )
-
-    return {
-        "feedback_id": feedback_id,
-        "post_id": post_id,
-        "comment_id": comment_id,
-        "reactions_summary": reactions_summary,
-    }
-
-
-def parse_facebook_user_hovercard(data):
-
-    # Navigate to user data in comet_hovercard_renderer
-    node = data.get("data", {}).get("node", {})
-    user = node.get("comet_hovercard_renderer", {}).get("user", {})
-
-    # Extract raw timeline context strings (Bio, Category, Links, Followers)
-    context_nodes = user.get("timeline_context_items", {}).get("nodes", [])
-    context_details = [
-        item.get("title", {}).get("text")
-        for item in context_nodes
-        if item.get("title", {}).get("text")
-    ]
-
-    # Map contextual items dynamically
-    category = next(
-        (
-            item
-            for item in context_details
-            if "Page ·" in item or "creator" in item.lower()
+    return ParserRepliesPage(
+        replies=parsed_replies,
+        page_info=ParserPageInfo(
+            type_cursor="comment_replies",
+            end_cursor=replies_conn.get("page_info", {}).get("end_cursor"),
+            has_next_page=replies_conn.get("page_info", {}).get("has_next_page", False),
         ),
-        None,
-    )
-    followers = next(
-        (item for item in context_details if "followers" in item.lower()), None
     )
 
-    return {
-        "type": "profile",
-        "id": user.get("id") or node.get("id"),
-        "name": user.get("name"),
-        "url": user.get("profile_url") or user.get("url"),
-        "is_verified": user.get("is_verified", False),
-        "is_memorialized": user.get("is_visibly_memorialized", False),
-        "profile_picture": user.get("profile_picture", {}).get("uri"),
-        "category": category,
-        "followers": followers,
-        "timeline_context": context_details,
-    }
 
-
-def parse_facebook_group_hovercard(data):
+def parse_facebook_group_hovercard(data) -> ParserGroup:
+    """Parse a group hovercard response into a ParserGroup."""
 
     node = data.get("data", {}).get("node", {})
     group = node.get("comet_hovercard_renderer", {}).get("group", {})
@@ -1165,450 +844,264 @@ def parse_facebook_group_hovercard(data):
     # Extract sample members from the facepile list
     facepile_edges = group.get("facepile_profiles", {}).get("edges", [])
     sample_members = [
-        {
-            "type": "profile",
-            "id": edge.get("node", {}).get("id"),
-            "name": edge.get("node", {}).get("name"),
-            "url": edge.get("node", {}).get("url"),
-            "profile_picture_url": (
+        ParserProfileRef(
+            id=edge.get("node", {}).get("id"),
+            name=edge.get("node", {}).get("name"),
+            url=edge.get("node", {}).get("url"),
+            profile_picture_url=(
                 edge.get("node", {}).get("profile_picture", {}).get("uri")
             ),
-        }
+        )
         for edge in facepile_edges
         if edge.get("node")
     ]
 
-    return {
-        "type": "group",
-        "id": group.get("id") or node.get("id"),
-        "name": group.get("name"),
-        "url": group.get("profile_url") or group.get("url"),
-        "privacy": group.get("privacy_info", {}).get("title", {}).get("text"),
-        "member_count": group.get("group_member_profiles", {}).get(
-            "formatted_count_text"
-        ),
-        "profile_picture_url": group.get("profile_picture", {}).get("uri"),
-        "sample_members": sample_members,
-    }
+    return ParserGroup(
+        id=group.get("id") or node.get("id"),
+        name=group.get("name"),
+        url=group.get("profile_url") or group.get("url"),
+        member_count=group.get("group_member_profiles", {}).get("formatted_count_text"),
+        profile_picture_url=group.get("profile_picture", {}).get("uri"),
+        sample_members=sample_members,
+    )
 
 
-def parse_user_summary(data):
-    """
-    Parses user.
-    """
-    # Target the exact user node path
-    user = data.get("data", {}).get("user", {})
-    delegate_page = user.get("delegate_page", None)
 
-    account = {
-        "account": {
-            "type": "profile",
-            "id": user.get("id"),
-        }
-    }
-
-    if delegate_page is not None:
-        account["account"]["name"] = delegate_page.get("name")
-        account["account"]["category"] = delegate_page.get("category_name")
-        account["account"]["description"] = delegate_page.get("best_description").get(
-            "text", None
-        )
-        account["account"]["bio"] = delegate_page.get("best_description", {}).get(
-            "text"
-        )
-        account["account"]["profile_picture_url"] = delegate_page.get(
-            "profile_picture_uri"
-        )
-
-    return account
-
-
-def parse_facebook_timeline(data):
+def parse_facebook_timeline(data) -> ParserTimelinePage:
+    """Parse a user timeline feed into a ParserTimelinePage."""
     return _parse_timeline_feed(data, "timeline_list_feed_units")
 
 
-def parse_group_about_info(data) -> dict:
+def parse_group_about_info(data) -> ParserGroup:
+    """Parse a group About payload into a ParserGroup."""
+
     group_data = data.get("data", {}).get("group", {})
     feed_units = group_data.get("about_feed_units", [])
 
-    result = {
-        "type": "group",
-        "id": group_data.get("id"),
-        "created_time": None,
-        "member_count": None,
-        "description": None,
-        "privacy_info": None,
-        "discoverability_info": None,
-    }
+    # Initialize with None — ParserGroup allows all optional fields
+    group_id = group_data.get("id")
+    creation_time = None
+    member_count = None
+    description = None
+    privacy_info = None
+    discoverability_info = None
 
     for unit in feed_units:
         typename = unit.get("__typename")
         unit_group = unit.get("group", {})
 
         # Fallback to unit-level ID if not present at the top level
-        if not result["id"] and unit_group.get("id"):
-            result["id"] = unit_group.get("id")
+        if not group_id and unit_group.get("id"):
+            group_id = unit_group.get("id")
 
         # Description, Privacy, and Discoverability
         if typename == "GroupsAboutFeedAboutCardUnit":
             desc_entities = unit_group.get("description_with_entities", {})
-            result["description"] = desc_entities.get("text")
+            description = desc_entities.get("text")
 
             for item in unit_group.get("about_info_items", []):
                 item_type = item.get("__typename")
                 item_group = item.get("group", {})
 
                 if item_type == "XFBPrivacyGroupsAboutInfoItem":
-                    result["privacy_info"] = (
-                        item_group.get("privacy_info").get("label").get("text")
-                    )
+                    privacy_info = item_group.get("privacy_info").get("label").get("text")
                 elif item_type == "XFBDiscoverabilityGroupsAboutInfoItem":
-                    result["discoverability_info"] = (
-                        item_group.get("discoverability_info").get("label").get("text")
-                    )
+                    discoverability_info = item_group.get("discoverability_info").get("label").get("text")
 
         # Member count via formatted_count_text
         elif typename == "GroupsAboutFeedMembersCardUnit":
-            result["member_count"] = unit_group.get("group_member_profiles", {}).get(
-                "formatted_count_text"
-            )
+            member_count = unit_group.get("group_member_profiles", {}).get("formatted_count_text")
 
         # Created time
         elif typename == "GroupsAboutFeedActivityCardUnit":
-            result["created_time"] = unit_group.get("created_time")
+            creation_time = unit_group.get("created_time")
 
-    return result
+    return ParserGroup(
+        id=group_id,
+        creation_time=creation_time,
+        member_count=member_count,
+        description=description,
+        privacy_info=privacy_info,
+        discoverability_info=discoverability_info,
+    )
 
 
-def parse_facebook_group_timeline(data):
+def parse_facebook_group_timeline(data) -> ParserTimelinePage:
+    """Parse a group timeline feed into a ParserTimelinePage."""
     return _parse_timeline_feed(data, "group_feed")
 
 
-def parse_timeline_app_collection_page_items(data):
+def parse_timeline_app_collection_page_items(data) -> ParserCollectionPage:
     """
     Parse any TimelineAppCollection (followers, following, friends, etc.)
     """
-
     node = data.get("data", {}).get("node", {})
     page_items = node.get("pageItems", {})
     edges = page_items.get("edges", [])
     raw_page_info = page_items.get("page_info", {})
 
-    result = {
-        "collection_id": node.get("id"),
-    }
-    items = []
+    items: List[ParserCollectionItem] = []
     for edge in edges:
         item_node = edge.get("node", {})
         inner_node = item_node.get("node", {})
+
         if inner_node.get("__typename", None) == "User":
             items.append(
-                {
-                    "type": "profile",
-                    "id": inner_node.get("id"),
-                    "name": item_node.get("title", {}).get("text"),
-                    "url": item_node.get("url"),
-                    "profile_picture_url": item_node.get("image_v2", {}).get("uri"),
-                    "is_verified": inner_node.get("is_verified", False),
-                }
+                ParserProfileRef(
+                    id=inner_node.get("id"),
+                    name=item_node.get("title", {}).get("text"),
+                    url=item_node.get("url"),
+                    profile_picture_url=item_node.get("image_v2", {}).get("uri"),
+                    is_verified=inner_node.get("is_verified", False),
+                )
             )
 
         elif inner_node.get("__typename", None) == "Photo":
+            photo = ParserPhotoMedia(
+                id=inner_node.get("id"),
+                image_url=item_node.get("image_v2", {}).get("uri"),
+            )
             items.append(
-                {
-                    "type": "photo",
-                    "id": inner_node.get("id", None),
-                    "image_url": item_node.get("image_v2").get("uri", None),
-                    "url": inner_node.get("url"),
-                }
+                ParserMediaPost(
+                    id=inner_node.get("id"),
+                    url=inner_node.get("url"),
+                    media=photo,
+                )
             )
 
-    result["items"] = items
-    result["page_info"] = {
-        "has_next_page": raw_page_info.get("has_next_page", False),
-        "end_cursor": raw_page_info.get("end_cursor"),
-    }
-    return result
+    return ParserCollectionPage(
+        collection_id=node.get("id"),
+        items=items,
+        page_info=ParserPageInfo(
+            has_next_page=raw_page_info.get("has_next_page", False),
+            end_cursor=raw_page_info.get("end_cursor"),
+        ),
+    )
 
 
-def parse_timeline_app_collection_aggregated_fb_shorts(data):
-    """
-    Parse any TimelineAppCollection BUT Specifically for Reels
-    """
+def parse_timeline_app_collection_aggregated_fb_shorts(data) -> ParserCollectionPage:
+    """Parse a reels (aggregated_fb_shorts) collection into a ParserCollectionPage."""
 
     node = data.get("data", {}).get("node", {})
     aggregated_fb_shorts = node.get("aggregated_fb_shorts", {})
     edges = aggregated_fb_shorts.get("edges", [])
     raw_page_info = aggregated_fb_shorts.get("page_info", {})
 
-    result = {
-        "collection_id": node.get("id"),
-    }
-    items = []
+    items: List[ParserCollectionItem] = []
     for edge in edges:
         item_node = edge.get("profile_reel_node", {})
         inner_node = item_node.get("node", {})
 
-        if inner_node.get("__typename", "") == "Story":
-            for attachment in inner_node.get("attachments", None):
-                if attachment.get("media", {}).get("__typename", "") == "Video":
-                    video_url = None
-                    for item in (
-                        attachment.get("media", {})
-                        .get("videoDeliveryResponseFragment", {})
-                        .get("videoDeliveryResponseResult", {})
-                        .get("progressive_urls", [])
-                    ):
-                        # loop and get the last one, the best one
-                        if item.get("failure_reason") is None:
-                            video_url = item.get("progressive_url", None)
+        if inner_node.get("__typename", "") != "Story":
+            continue
 
-                    items.append(
-                        {
-                            "type": "video",
-                            "id": attachment.get("media", {}).get("id", None),
-                            "length_in_second": attachment.get("media", {}).get(
-                                "length_in_second", None
-                            ),
-                            "created_time": attachment.get("media", {}).get(
-                                "created_time", None
-                            ),
-                            "thumbnail_image_url": (
-                                attachment.get("media", {})
-                                .get("thumbnailImage", {})
-                                .get("uri", None)
-                            ),
-                            "video_url": video_url,
-                            "url": attachment.get("media", {}).get(
-                                "permalink_url", None
-                            ),
-                            "post": {
-                                "type": "post",
-                                "id": inner_node.get("post_id", None),
-                                "creation_time": inner_node.get("creation_time", None),
-                                "text": (inner_node.get("message") or {}).get(
-                                    "text", None
-                                ),
-                                "author": {
-                                    "type": "profile",
-                                    "id": inner_node.get("actors", [{}])[0].get(
-                                        "id", None
-                                    ),
-                                    "name": inner_node.get("actors", [{}])[0].get(
-                                        "name", None
-                                    ),
-                                    "url": inner_node.get("actors", [{}])[0].get(
-                                        "url", None
-                                    ),
-                                    "is_verified": inner_node.get("actors", [{}])[
-                                        0
-                                    ].get("is_verified", None),
-                                },
-                            },
-                            "author": {
-                                "type": "profile",
-                                "id": (
-                                    attachment.get("media", {})
-                                    .get("owner", {})
-                                    .get("id", None)
-                                ),
-                                "name": (
-                                    attachment.get("media", {})
-                                    .get("owner", {})
-                                    .get("name", None)
-                                ),
-                                "url": (
-                                    attachment.get("media", {})
-                                    .get("owner", {})
-                                    .get("url", None)
-                                ),
-                                "is_verified": (
-                                    attachment.get("media", {})
-                                    .get("owner", {})
-                                    .get("is_verified", None)
-                                ),
-                                "profile_picture_url": (
-                                    attachment.get("media", {})
-                                    .get("owner", {})
-                                    .get("displayPicture", {})
-                                    .get("uri", None)
-                                ),
-                            },
-                            "play_count": attachment.get("media", {}).get(
-                                "play_count_reduced", None
-                            ),
-                        }
-                    )
+        for attachment in inner_node.get("attachments") or []:
+            media = attachment.get("media", {})
 
-    result["items"] = items
-    result["page_info"] = {
-        "has_next_page": raw_page_info.get("has_next_page", False),
-        "end_cursor": raw_page_info.get("end_cursor"),
-    }
-    return result
+            # Facebook sometimes return null to media
+            if media is None:
+                continue
 
+            if media.get("__typename") != "Video":
+                continue
 
-def parse_group_member_summary(data):
-    """Parses FB Group JSON for group ID, member counts, admins, and members.
+            video_url = None
+            for item in (
+                media.get("videoDeliveryResponseFragment", {})
+                .get("videoDeliveryResponseResult", {})
+                .get("progressive_urls", [])
+            ):
+                if item.get("failure_reason") is None:
+                    video_url = item.get("progressive_url", None)
 
-    Ignores the 'Things in Common' section and extracts page_info pagination data.
-    """
-    group = data.get("data", {}).get("group", {})
+            actors = inner_node.get("actors") or [{}]
+            a = actors[0]
+            owner = media.get("owner") or {}
 
-    def extract_account(node: dict) -> dict:
-        if not node:
-            return {}
-        return {
-            "type": "profile",
-            "id": node.get("id"),
-            "name": node.get("name"),
-            "url": node.get("url"),
-            "profile_picture_url": node.get("profile_picture", {}).get("uri"),
-            "category": node.get("profile_plus_category_display_name"),
-            "bio": node.get("bio_text", {}).get("text")
-            if isinstance(node.get("bio_text"), dict)
-            else None,
-            "follower_count": node.get("follower_count", None),
-        }
-
-    # 2. Extract Admins
-    admin_data = group.get("group_admin_profiles", {})
-    admin_edges = admin_data.get("edges", [])
-
-    admins_list = [
-        {"account": extract_account(edge.get("node"))}
-        for edge in admin_edges
-        if edge.get("node")
-    ]
-
-    # 3. Extract Members (Excluding GroupThingsInCommonSection)
-    members_list = []
-
-    # Iterate through paginated sections and skip 'GroupThingsInCommonSection'
-    new_members = group.get("new_members", {})
-    for edge in new_members.get("edges", []):
-        node = edge.get("node")
-
-        points = None
-        if (
-            node.get("group_membership", {}).get("group_contribution_score_text", None)
-            is not None
-        ):
-            points = (
-                node.get("group_membership", {})
-                .get("group_contribution_score_text", {})
-                .get("text", None)
+            reel = ParserMediaPost(
+                id=media.get("id", ""),
+                url=media.get("permalink_url"),
+                creation_time=inner_node.get("creation_time"),
+                text=(inner_node.get("message") or {}).get("text"),
+                author=ParserProfileRef(
+                    id=owner.get("id"),
+                    name=owner.get("name"),
+                    url=owner.get("url"),
+                    is_verified=owner.get("is_verified"),
+                    profile_picture_url=(owner.get("displayPicture") or {}).get("uri"),
+                ),
+                media=ParserVideoMedia(
+                    id=media.get("id"),
+                    length_in_second=media.get("length_in_second"),
+                    creation_time=media.get("created_time"),
+                    thumbnail_image_url=(media.get("thumbnailImage") or {}).get("uri"),
+                    video_url=video_url,
+                    play_count=media.get("play_count_reduced"),
+                ),
             )
 
-        members_list.append(
-            {
-                "join_status": edge.get("join_status_text", {}).get("text", None),
-                "points": points,
-                "account": extract_account(node),
-            }
-        )
+            items.append(reel)
 
-    return {
-        "id": group.get("id", None),
-        "member_count": group.get("group_member_profiles", {}).get("count", None),
-        "admin_count": admin_data.get("count", len(admins_list)),
-        "admins": {
-            "accounts": admins_list,
-            "page_info": {
-                "type_cursor": "members",
-                "has_next_page": admin_data.get("page_info", {}).get(
-                    "has_next_page", None
-                ),
-                "end_cursor": admin_data.get("page_info", {}).get("end_cursor", None),
-            },
-        },
-        "members": {
-            "accounts": members_list,
-            "page_info": {
-                "type_cursor": "members",
-                "has_next_page": new_members.get("page_info", {}).get(
-                    "has_next_page", None
-                ),
-                "end_cursor": new_members.get("page_info", {}).get("end_cursor", None),
-            },
-        },
-    }
-
-
-def parse_group_members(data):
-    """
-    Parses Facebook group members from a GraphQL payload using the
-    standardized account and pagination schema used across the parser module.
-    """
-
-    # Navigate to new_members node safely across different response wrappers
-    data_node = data.get("data", {}).get("node", {}) or data.get("data", {}).get(
-        "group", {}
+    return ParserCollectionPage(
+        collection_id=node.get("id"),
+        items=items,
+        page_info=ParserPageInfo(
+            has_next_page=raw_page_info.get("has_next_page", False),
+            end_cursor=raw_page_info.get("end_cursor"),
+        ),
     )
-    new_members = data_node.get("new_members", {})
 
+def parse_group_members(data) -> ParserGroupMembersPage:
+    """Parse a group members pagination payload into a ParserGroupMembersPage."""
+
+    data_node = data.get("data", {}).get("node", {}) or data.get("data", {}).get("group", {})
+    new_members = data_node.get("new_members", {})
     edges = new_members.get("edges", [])
     raw_page_info = new_members.get("page_info", {})
 
-    parsed_members = []
+    parsed_members: List[ParserGroupMember] = []
     for edge in edges:
         if not edge:
             continue
-
         node = edge.get("node", {})
         if not node:
             continue
 
-        # Extract contribution score if present
         membership = node.get("group_membership") or {}
         score_obj = membership.get("group_contribution_score_text")
-        contribution_score = (
-            score_obj.get("text") if isinstance(score_obj, dict) else None
-        )
-
-        # Extract bio safely
-        bio_obj = node.get("bio_text")
-        bio = bio_obj.get("text") if isinstance(bio_obj, dict) else None
+        contribution_score = score_obj.get("text") if isinstance(score_obj, dict) else None
 
         parsed_members.append(
-            {
-                "join_status": edge.get("join_status_text", {}).get("text", None),
-                "contribution_score": contribution_score,
-                "account": {
-                    "type": "profile",
-                    "id": node.get("id", None),
-                    "name": node.get("name", None),
-                    "url": node.get("url", None),
-                    "profile_picture_url": node.get("profile_picture", {}).get(
-                        "uri", None
-                    ),
-                    "category": node.get("profile_plus_category_display_name", None),
-                    "bio": bio,
-                    "follower_count": node.get("follower_count", None),
-                },
-            }
+            ParserGroupMember(
+                join_status=(edge.get("join_status_text") or {}).get("text"),
+                contribution_score=contribution_score,
+                account=ParserProfileRef(
+                    id=node.get("id"),
+                    name=node.get("name"),
+                    url=node.get("url"),
+                    profile_picture_url=(node.get("profile_picture") or {}).get("uri"),
+                ),
+            )
         )
 
-    return {
-        "members": parsed_members,
-        "page_info": {
-            "type_cursor": "group_members",
-            "end_cursor": raw_page_info.get("end_cursor", None),
-            "has_next_page": raw_page_info.get("has_next_page", False),
-            "has_previous_page": raw_page_info.get("has_previous_page", False),
-            "start_cursor": raw_page_info.get("start_cursor", None),
-        },
-    }
+    return ParserGroupMembersPage(
+        members=parsed_members,
+        page_info=ParserPageInfo(
+            type_cursor="group_members",
+            end_cursor=raw_page_info.get("end_cursor"),
+            has_next_page=raw_page_info.get("has_next_page", False),
+        ),
+    )
 
 
-def parse_facebook_serp_search(response):
+def parse_facebook_serp_search(response) -> ParserSearchResults:
     """
     Parse a Facebook SERP (search engine results page) response.
     Handles user results (role == "ENTITY_USER") and post results (role == "TOP_PUBLIC_POSTS").
     """
     serp = response.get("data", {}).get("serpResponse") or response.get("serpResponse")
     if not serp:
-        return {"profiles": [], "posts": [], "page_info": {}}
+        return ParserSearchResults()
 
     results = serp.get("results", {})
     edges = results.get("edges", [])
@@ -1630,27 +1123,23 @@ def parse_facebook_serp_search(response):
                 continue
 
             profiles.append(
-                {
-                    "type": "profile",
-                    "id": profile.get("id", None),
-                    "name": profile.get("name", None),
-                    "url": profile.get("url", None),
-                    "profile_picture_url": profile.get("profile_picture", {}).get(
-                        "uri", None
-                    ),
-                    "is_verified": profile.get("is_verified", None),
-                }
+                ParserProfileRef(
+                    id=profile.get("id"),
+                    name=profile.get("name"),
+                    url=profile.get("url"),
+                    profile_picture_url=(profile.get("profile_picture") or {}).get("uri"),
+                    is_verified=profile.get("is_verified"),
+                )
             )
 
         # --- Post result ---
-        elif role in ("TOP_PUBLIC_POSTS", "SEMANTIC_PUBLIC_POSTS", "PUBLIC_POSTS"):
+        elif role in ("TOP_PUBLIC_POSTS", "SEMANTIC_PUBLIC_POSTS", "PUBLIC_POSTS", "POSTS_WITH_RELAXATION", "FEED_POSTS", "POST_SILVER_TORCH"):
             story = vm.get("click_model", {}).get("story")
             if not story:
                 continue
 
-            parsed_post = _parse_feed_post({"node": story})
-            if parsed_post:
-                posts.append(parsed_post)
+            feed_posts = _parse_feed_post({"node": story})
+            posts.extend(feed_posts)
 
         # --- Group list card (VLIST module, many groups per edge) ---
         elif role == "EXPLORE_GROUPS_VLIST":
@@ -1664,20 +1153,22 @@ def parse_facebook_serp_search(response):
             group = _extract_group_from_view_model(rendering.get("view_model", {}))
             if group:
                 groups.append(group)
+        # else:
+        #     print(role)
 
     page_info = results.get("page_info", {})
-    return {
-        "profiles": profiles,
-        "posts": posts,
-        "groups": groups,
-        "page_info": {
-            "has_next_page": page_info.get("has_next_page", False),
-            "end_cursor": page_info.get("end_cursor"),
-        },
-    }
+    return ParserSearchResults(
+        profiles=profiles,
+        posts=posts,
+        groups=groups,
+        page_info=ParserPageInfo(
+            has_next_page=page_info.get("has_next_page", False),
+            end_cursor=page_info.get("end_cursor"),
+        ),
+    )
 
 
-def _parse_marketplace_listing(canonical_listing):
+def _parse_marketplace_listing(canonical_listing) -> Optional[ParserMarketplaceListing]:
     """
     Normalize a single marketplace listing (canonical_listing) into a dict.
     """
@@ -1697,131 +1188,49 @@ def _parse_marketplace_listing(canonical_listing):
 
     video = canonical_listing.get("listing_video")
 
-    return {
-        "type": "marketplace_listing",
-        "id": canonical_listing.get("id", None),
-        "title": canonical_listing.get("marketplace_listing_title", None),
-        "category_id": canonical_listing.get("marketplace_listing_category_id", None),
-        "currency": iso4217parse.parse(price.get("formatted_amount"))[0].alpha3
+    return ParserMarketplaceListing(
+        id=canonical_listing.get("id"),
+        title=canonical_listing.get("marketplace_listing_title"),
+        category_id=canonical_listing.get("marketplace_listing_category_id"),
+        currency=iso4217parse.parse(price.get("formatted_amount"))[0].alpha3
         if price.get("formatted_amount")
         else None,
-        "price": int(Price.fromstring(price.get("formatted_amount")).amount)
+        price=int(Price.fromstring(price.get("formatted_amount")).amount)
         if price.get("formatted_amount")
         else None,
-        "strikethrough_price": strikethrough.get("amount", None),
-        "location": {
-            "city": reverse_geocode.get("city", None),
-            "state": reverse_geocode.get("state", None),
-            "city_page": {
-                "id": city_page.get("id", None),
-                "display_name": city_page.get("display_name", None),
-            }
-            if city_page
-            else None,
-        },
-        "is_hidden": canonical_listing.get("is_hidden", None),
-        "is_live": canonical_listing.get("is_live", None),
-        "is_pending": canonical_listing.get("is_pending", None),
-        "is_sold": canonical_listing.get("is_sold", None),
-        "min_listing_price": canonical_listing.get("min_listing_price", None),
-        "max_listing_price": canonical_listing.get("max_listing_price", None),
-        "marketplace_listing_category_id": canonical_listing.get(
-            "marketplace_listing_category_id", None
+        strikethrough_price=strikethrough.get("amount"),
+        location=ParserMarketplaceLocation(
+            city=reverse_geocode.get("city"),
+            state=reverse_geocode.get("state"),
+            city_page=ParserMarketplaceCityPage(
+                id=city_page.get("id"),
+                display_name=city_page.get("display_name"),
+            ) if city_page else None,
+        ) if location else None,
+        is_hidden=canonical_listing.get("is_hidden"),
+        is_live=canonical_listing.get("is_live"),
+        is_pending=canonical_listing.get("is_pending"),
+        is_sold=canonical_listing.get("is_sold"),
+        min_listing_price=canonical_listing.get("min_listing_price"),
+        max_listing_price=canonical_listing.get("max_listing_price"),
+        created_with_seller_app=canonical_listing.get("created_with_seller_app"),
+        delivery_types=canonical_listing.get("delivery_types"),
+        listing_photo=ParserPhotoMedia(
+            id=photo.get("id"),
+            image_url=photo_image.get("uri"),
+        ) if photo else None,
+        video=ParserVideoMedia(id=video.get("id")) if video else None,
+        seller=ParserSeller(
+            profile=ParserProfileRef(
+                id=seller.get("id"),
+                name=seller.get("name"),
+            )
         ),
-        "created_with_seller_app": canonical_listing.get(
-            "created_with_seller_app", None
-        ),
-        "delivery_types": canonical_listing.get("delivery_types", None),
-        "listing_photo": {
-            "type": "photo",
-            "id": photo.get("id", None),
-            "image_url": photo_image.get("uri", None),
-        }
-        if photo
-        else None,
-        "video": {
-            "type": "video",
-            "id": video.get("id", None),
-        }
-        if video
-        else None,
-        "seller": {
-            "profile": {
-                "type": "profile",
-                "id": seller.get("id", None),
-                "name": seller.get("name", None),
-            }
-        },
-    }
+    )
 
+def parse_marketplace_search(data) -> ParserMarketplaceSearchPage:
+    """Parse a marketplace search response into a ParserMarketplaceSearchPage."""
 
-def parse_user_marketplace(data):
-    """
-    Parse a user's marketplace_listing_sets connection.
-
-    Handles both `data.node` and top-level `node` response shapes,
-    aggregating edges from either (or both) and returning normalized
-    listings plus pagination metadata.
-    """
-    candidates = [
-        data.get("data", {}).get("node", {}),
-        data.get("node", {}),
-    ]
-
-    all_edges = []
-    raw_page_info = {}
-
-    for entity in candidates:
-        if not entity:
-            continue
-
-        listing_sets = entity.get("marketplace_listing_sets", {}) or {}
-        edges = listing_sets.get("edges", [])
-        if edges:
-            all_edges.extend(edges)
-
-        info = listing_sets.get("page_info", {})
-        if info and not raw_page_info:
-            raw_page_info = info
-
-    listings = []
-    for edge in all_edges:
-        if not edge:
-            continue
-        node = edge.get("node", {})
-        if not node:
-            continue
-
-        canonical_listing = node.get("canonical_listing")
-        parsed = _parse_marketplace_listing(canonical_listing)
-        if parsed is None:
-            continue
-
-        listings.append(parsed)
-
-    return {
-        "listings": listings,
-        "page_info": {
-            "type_cursor": "user_marketplace_listings",
-            "end_cursor": raw_page_info.get("end_cursor"),
-            "has_next_page": raw_page_info.get("has_next_page", False),
-        },
-    }
-
-
-def parse_marketplace_search(data):
-    """
-    Parse a marketplace_search feed_units connection.
-
-    Handles both `data.marketplace_search` and top-level
-    `marketplace_search` response shapes, aggregating edges from
-    either (or both) and returning normalized listings plus
-    pagination metadata.
-
-    Note: feed_units contains mixed node types (listing stories,
-    SERP banners, SERP headers). Only listing stories are parsed;
-    non-listing nodes are skipped.
-    """
     candidates = [
         data.get("data", {}).get("marketplace_search", {}),
         data.get("marketplace_search", {}),
@@ -1833,52 +1242,44 @@ def parse_marketplace_search(data):
     for entity in candidates:
         if not entity:
             continue
-
         feed_units = entity.get("feed_units", {}) or {}
         edges = feed_units.get("edges", [])
         if edges:
             all_edges.extend(edges)
-
         info = feed_units.get("page_info", {})
         if info and not raw_page_info:
             raw_page_info = info
 
-    listings = []
+    listings: List[ParserMarketplaceListing] = []
     for edge in all_edges:
         if not edge:
             continue
         node = edge.get("node", {})
         if not node:
             continue
-
-        # Only parse listing story nodes; skip banners/headers
         if node.get("__typename") != "MarketplaceFeedListingStoryObject":
             continue
+        parsed = _parse_marketplace_listing(node.get("listing"))
+        if parsed is not None:
+            listings.append(parsed)
 
-        listing = node.get("listing")
-        parsed = _parse_marketplace_listing(listing)
-        if parsed is None:
-            continue
-
-        listings.append(parsed)
-
-    return {
-        "listings": listings,
-        "page_info": {
-            "type_cursor": "marketplace_search",
-            "end_cursor": raw_page_info.get("end_cursor"),
-            "has_next_page": raw_page_info.get("has_next_page", False),
-        },
-    }
+    return ParserMarketplaceSearchPage(
+        listings=listings,
+        page_info=ParserPageInfo(
+            type_cursor="marketplace_search",
+            end_cursor=raw_page_info.get("end_cursor"),
+            has_next_page=raw_page_info.get("has_next_page", False),
+        ),
+    )
 
 
-def _parse_marketplace_pdp_listing(target):
+def _parse_marketplace_pdp_listing(target) -> Optional[ParserMarketplaceListing]:
     """
-    Normalize a marketplace PDP listing (GroupCommerceProductItem) into a dict.
+    Normalize a Marketplace PDP listing (GroupCommerceProductItem).
 
-    `target`   = data.viewer.marketplace_product_details_page.target
-
+    `target` = data.viewer.marketplace_product_details_page.target
     """
+
     if not target:
         return None
 
@@ -1906,116 +1307,70 @@ def _parse_marketplace_pdp_listing(target):
         except (TypeError, ValueError):
             price_amount = None
 
-    return {
-        "type": "marketplace_listing",
-        "id": target.get("id"),
-        "category_id": target.get("marketplace_listing_category_id"),
-        "url": story.get("url"),
-        "post_id": story.get("post_id"),
-        "creation_time": target.get("creation_time"),
-        "currency": price.get("currency"),
-        "price": price_amount,
-        "strikethrough_price": int(
+    stats = seller.get("marketplace_ratings_stats_by_role_v2", {})
+    seller_stats = stats.get("seller_stats", {})
+    combined = stats.get("seller_buyer_combined", {})
+
+    return ParserMarketplaceListing(
+        id=target.get("id"),
+        category_id=target.get("marketplace_listing_category_id"),
+        url=story.get("url"),
+        post_id=story.get("post_id"),
+        creation_time=target.get("creation_time"),
+        currency=price.get("currency"),
+        price=price_amount,
+        strikethrough_price=int(
             Price.fromstring(strikethrough.get("formattedAmountWithoutDecimals")).amount
-        )
-        if strikethrough.get("formattedAmountWithoutDecimals")
-        else None,
-        "location_text": location_text.get("text"),
-        "latitude": (target.get("location") or {}).get("latitude"),
-        "longitude": (target.get("location") or {}).get("longitude"),
-        "title": target.get("marketplace_listing_title"),
-        "description": description.get("text"),
-        "discounts_text": target.get("discounts_text"),
-        "is_live": target.get("is_live"),
-        "is_pending": target.get("is_pending"),
-        "is_sold": target.get("is_sold"),
-        "is_hidden": target.get("is_hidden"),
-        "is_on_marketplace": target.get("is_on_marketplace"),
-        "seller": {
-            "profile": {
-                "type": "profile",
-                "id": seller.get("id"),
-                "name": seller.get("name"),
-                "profile_picture_url": seller.get("profile_picture", {}).get("uri"),
-                "joined_time": seller.get("join_time"),
-            },
-            "verified_badge": seller.get("marketplace_should_display_verified_badge"),
-            "seller_ratings_are_private": (
-                seller.get("marketplace_ratings_stats_by_role_v2", {}).get(
-                    "seller_ratings_are_private"
-                )
+        ) if strikethrough.get("formattedAmountWithoutDecimals") else None,
+        location_text=location_text.get("text"),
+        latitude=(target.get("location") or {}).get("latitude"),
+        longitude=(target.get("location") or {}).get("longitude"),
+        title=target.get("marketplace_listing_title"),
+        description=description.get("text"),
+        discounts_text=target.get("discounts_text"),
+        is_live=target.get("is_live"),
+        is_pending=target.get("is_pending"),
+        is_sold=target.get("is_sold"),
+        is_hidden=target.get("is_hidden"),
+        is_on_marketplace=target.get("is_on_marketplace"),
+        seller=ParserSeller(
+            profile=ParserProfileRef(
+                id=seller.get("id"),
+                name=seller.get("name"),
+                profile_picture_url=(seller.get("profile_picture") or {}).get("uri"),
             ),
-            "seller_stats": {
-                "five_star_ratings_average": (
-                    seller.get("marketplace_ratings_stats_by_role_v2", {})
-                    .get("seller_stats", {})
-                    .get("five_star_ratings_average")
-                ),
-                "five_star_total_rating_count_by_role": (
-                    seller.get("marketplace_ratings_stats_by_role_v2", {})
-                    .get("seller_stats", {})
-                    .get("five_star_total_rating_count_by_role")
-                ),
-            },
-            "seller_buyer_combined_ratings_are_private": (
-                seller.get("marketplace_ratings_stats_by_role_v2", {})
-                .get("seller_buyer_combined", {})
-                .get("ratings_are_private")
+            joined_time=seller.get("join_time"),
+            verified_badge=seller.get("marketplace_should_display_verified_badge"),
+            seller_ratings_are_private=stats.get("seller_ratings_are_private"),
+            seller_stats=ParserSellerStats(
+                five_star_ratings_average=seller_stats.get("five_star_ratings_average"),
+                five_star_total_rating_count_by_role=seller_stats.get("five_star_total_rating_count_by_role"),
             ),
-            "seller_buyer_combined": {
-                "five_star_ratings_average": (
-                    seller.get("marketplace_ratings_stats_by_role_v2", {})
-                    .get("seller_buyer_combined", {})
-                    .get("five_star_ratings_average")
-                ),
-                "five_star_total_rating_count_by_role": (
-                    seller.get("marketplace_ratings_stats_by_role_v2", {})
-                    .get("seller_buyer_combined", {})
-                    .get("five_star_total_rating_count_by_role")
-                ),
-            },
-        },
-        "attributes": [
-            {"name": a.get("attribute_name"), "value": a.get("value")}
+            seller_buyer_combined_ratings_are_private=combined.get("ratings_are_private"),
+            seller_buyer_combined=ParserSellerStats(
+                five_star_ratings_average=combined.get("five_star_ratings_average"),
+                five_star_total_rating_count_by_role=combined.get("five_star_total_rating_count_by_role"),
+            ),
+        ),
+        attributes=[
+            ParserAttribute(name=a.get("attribute_name"), value=a.get("value"))
             for a in attribute_data
         ],
-        "delivery_types": target.get("delivery_types"),
-        "is_shipping_offered": target.get("is_shipping_offered"),
-        "is_buy_now_enabled": target.get("is_buy_now_enabled"),
-        "is_checkout_enabled": target.get("is_checkout_enabled"),
-        "is_cart_enabled": target.get("is_cart_enabled"),
-        "is_purchase_protected": target.get("is_purchase_protected"),
-        "inventory_count": target.get("inventory_count"),
-        "messaging_enabled": target.get("messaging_enabled"),
-        "created_with_seller_app": target.get("created_with_seller_app"),
-        # -------------------------
-        # Partner fields
-        # -------------------------
-        "partner": {
-            "profile": {
-                "type": "profile",
-                "id": None,
-                "name": None,
-                "profile_picture_url": None,
-            },
-            "partner_brand_name": None,
-            "seller_review_count": None,
-            "seller_positive_ratings_pct": None,
-            "seller_member_since": None,
-            "number_of_sold_listings": None,
-            "average_ship_time": None,
-        },
-        "shipping_cost_text": None,
-        "has_shipping_cost": None,
-        "delivery_window_text": None,
-        "product_details_page_uri": None,
-    }
+        delivery_types=target.get("delivery_types"),
+        is_shipping_offered=target.get("is_shipping_offered"),
+        is_buy_now_enabled=target.get("is_buy_now_enabled"),
+        is_checkout_enabled=target.get("is_checkout_enabled"),
+        is_cart_enabled=target.get("is_cart_enabled"),
+        is_purchase_protected=target.get("is_purchase_protected"),
+        inventory_count=target.get("inventory_count"),
+        messaging_enabled=target.get("messaging_enabled"),
+        created_with_seller_app=target.get("created_with_seller_app"),
+    )
 
 
-def _parse_marketplace_partner_pdp_listing(target):
+def _parse_marketplace_partner_pdp_listing(target) -> Optional[ParserMarketplaceListing]:
     """
-    Normalize a partner marketplace PDP listing (ProductItem, e.g. eBay)
-    into a dict.
+    Normalize a partner Marketplace PDP listing (e.g. eBay).
 
     `target` = data.viewer.marketplace_product_details_page.target
     """
@@ -2028,107 +1383,49 @@ def _parse_marketplace_partner_pdp_listing(target):
     partner_seller = (target.get("partner_seller_info") or {}).get("seller_info") or {}
     shipping = target.get("shipping_cost_info") or {}
 
-    return {
-        "type": "marketplace_listing",
-        "id": target.get("id"),
-        "category_id": target.get("marketplace_listing_category_id"),
-        "url": story.get("url"),
-        "post_id": story.get("post_id"),
-        "creation_time": None,
-        "currency": iso4217parse.parse(price.get("formatted_amount_zeros_stripped"))[
-            0
-        ].alpha3
+    return ParserMarketplaceListing(
+        id=target.get("id"),
+        category_id=target.get("marketplace_listing_category_id"),
+        url=story.get("url"),
+        post_id=story.get("post_id"),
+        currency=iso4217parse.parse(price.get("formatted_amount_zeros_stripped"))[0].alpha3
         if price.get("formatted_amount_zeros_stripped")
         else None,
-        "price": int(
-            Price.fromstring(price.get("formatted_amount_zeros_stripped")).amount
-        )
+        price=int(Price.fromstring(price.get("formatted_amount_zeros_stripped")).amount)
         if price.get("formatted_amount_zeros_stripped")
         else None,
-        "strikethrough_price": None,
-        "location_text": target.get("partner_listing_location"),
-        "latitude": None,
-        "longitude": None,
-        "title": target.get("marketplace_listing_title"),
-        "description": description.get("text"),
-        "discounts_text": None,
-        "is_live": None,
-        "is_pending": None,
-        "is_sold": None,
-        "is_hidden": None,
-        "is_on_marketplace": None,
-        "seller": {
-            "profile": {
-                "type": "profile",
-                "id": None,
-                "name": None,
-                "profile_picture_url": None,
-                "joined_time": None,
-            },
-            "verified_badge": None,
-            "seller_ratings_are_private": None,
-            "seller_stats": {
-                "five_star_ratings_average": None,
-                "five_star_total_rating_count_by_role": None,
-            },
-            "seller_buyer_combined_ratings_are_private": None,
-            "seller_buyer_combined": {
-                "five_star_ratings_average": None,
-                "five_star_total_rating_count_by_role": None,
-            },
-        },
-        "attributes": [
-            {"name": a.get("display_name"), "value": a.get("value")}
+        location_text=target.get("partner_listing_location"),
+        title=target.get("marketplace_listing_title"),
+        description=description.get("text"),
+        is_shipping_offered=target.get("is_shipped_listing"),
+        attributes=[
+            ParserAttribute(name=a.get("display_name"), value=a.get("value"))
             for a in (target.get("partner_item_attribute_data") or [])
         ],
-        "delivery_types": None,
-        "is_shipping_offered": target.get("is_shipped_listing"),
-        "is_buy_now_enabled": None,
-        "is_checkout_enabled": None,
-        "is_cart_enabled": None,
-        "is_purchase_protected": None,
-        "inventory_count": None,
-        "messaging_enabled": None,
-        "created_with_seller_app": None,
-        # -------------------------
-        # Partner fields
-        # -------------------------
-        "partner": {
-            "profile": {
-                "type": "profile",
-                "id": partner_seller.get("id"),
-                "name": partner_seller.get("partner_seller_name"),
-                "profile_picture_url": partner_seller.get("seller_photo_url"),
-            },
-            "partner_brand_name": target.get("partner_brand_name"),
-            "seller_review_count": partner_seller.get("seller_review_count"),
-            "seller_positive_ratings_pct": partner_seller.get(
-                "seller_positive_ratings_pct"
+        partner=ParserPartnerSeller(
+            profile=ParserProfileRef(
+                id=partner_seller.get("id"),
+                name=partner_seller.get("partner_seller_name"),
+                profile_picture_url=partner_seller.get("seller_photo_url"),
             ),
-            "seller_member_since": partner_seller.get("seller_member_since"),
-            "number_of_sold_listings": partner_seller.get("number_of_sold_listings"),
-            "average_ship_time": partner_seller.get("average_ship_time"),
-        },
-        "shipping_cost_text": shipping.get("shipping_cost_text"),
-        "has_shipping_cost": shipping.get("has_shipping_cost"),
-        "delivery_window_text": target.get("delivery_window_text"),
-        "product_details_page_uri": target.get("product_details_page_uri"),
-    }
+            partner_brand_name=target.get("partner_brand_name"),
+            seller_review_count=partner_seller.get("seller_review_count"),
+            seller_positive_ratings_pct=partner_seller.get("seller_positive_ratings_pct"),
+            seller_member_since=partner_seller.get("seller_member_since"),
+            number_of_sold_listings=partner_seller.get("number_of_sold_listings"),
+            average_ship_time=partner_seller.get("average_ship_time"),
+        ),
+        shipping_cost_text=shipping.get("shipping_cost_text"),
+        has_shipping_cost=shipping.get("has_shipping_cost"),
+        delivery_window_text=target.get("delivery_window_text"),
+        product_details_page_uri=target.get("product_details_page_uri"),
+    )
 
+def parse_marketplace_pdp(data) -> Optional[ParserMarketplacePDP]:
+    """Parse a marketplace PDP response into a ParserMarketplacePDP."""
 
-def parse_marketplace_pdp(data):
-    """
-    Parse a Marketplace Product Details Page (PDP) payload.
-
-    Handles both `data.viewer.marketplace_product_details_page` and
-    top-level `viewer.marketplace_product_details_page`.
-
-    Returns a single listing (PDP is per-item, not paginated).
-    """
     candidates = [
-        data.get("data", {})
-        .get("viewer", {})
-        .get("marketplace_product_details_page", {}),
+        data.get("data", {}).get("viewer", {}).get("marketplace_product_details_page", {}),
         data.get("viewer", {}).get("marketplace_product_details_page", {}),
     ]
 
@@ -2144,28 +1441,14 @@ def parse_marketplace_pdp(data):
     if parsed is None:
         return None
 
-    parsed["product_details_type"] = pdp_node.get("product_details_type")
+    parsed.product_details_type = pdp_node.get("product_details_type")
+    return ParserMarketplacePDP(listing=parsed)
 
-    return {"listing": parsed}
+def parse_marketplace_pdp_media(data) -> Optional[ParserMarketplaceMedia]:
+    """Parse a marketplace PDP media response into a ParserMarketplaceMedia."""
 
-
-def parse_marketplace_pdp_media(data):
-    """
-    Parse the media-only marketplace PDP payload.
-
-    Meta splits the PDP GraphQL query into two responses: one for the
-    listing fields, one for the media (photos + videos). This parses
-    the media response.
-
-    Handles both `data.viewer.marketplace_product_details_page` and
-    top-level `viewer.marketplace_product_details_page`.
-
-    Returns a single media bundle (PDP is per-item, not paginated).
-    """
     candidates = [
-        data.get("data", {})
-        .get("viewer", {})
-        .get("marketplace_product_details_page", {}),
+        data.get("data", {}).get("viewer", {}).get("marketplace_product_details_page", {}),
         data.get("viewer", {}).get("marketplace_product_details_page", {}),
     ]
 
@@ -2177,49 +1460,255 @@ def parse_marketplace_pdp_media(data):
     if not target:
         return None
 
-    listing_id = target.get("id")
+    photos = [
+        ParserPhotoMedia(id=p.get("id"), image_url=(p.get("image") or {}).get("uri"))
+        for p in (target.get("listing_photos") or [])
+        if p
+    ]
 
-    photos = []
-    for photo in target.get("listing_photos") or []:
-        if not photo:
+    videos = [
+        ParserVideoMedia(
+            id=v.get("id"),
+            thumbnail_image_url=(v.get("image") or {}).get("uri"),
+            video_url=v.get("playable_url_hd") or v.get("playable_url"),
+        )
+        for v in (target.get("pre_recorded_videos") or [])
+        if v
+    ]
+
+    return ParserMarketplaceMedia(
+        listing_id=target.get("id"),
+        is_hidden=target.get("is_hidden"),
+        photos=photos,
+        videos=videos,
+    )
+
+# ---------- photo / video media viewer -> ParserMediaPost ----------
+
+def parse_media_post_photo(data) -> Optional[ParserMediaPost]:
+    """Parse a photo media-viewer payload (`data.currMedia`) into a ParserMediaPost."""
+
+    data_currMedia = data.get("data", {}).get("currMedia")
+    currMedia = data.get("currMedia")
+    if not data_currMedia:
+        return None
+
+    # ---- Author (owner) ----
+    owner = data_currMedia.get("owner") or {}
+    author_id = owner.get("id")
+
+    # ---- Image ----
+    image = data_currMedia.get("image") or {}
+
+    # ---- Feedback (reactions + shares) ----
+    data_currMedia_feedback = data_currMedia.get("feedback") or {}
+    currMedia_feedback = currMedia.get("feedback") or {}
+
+    reaction_display_strategy = None
+    comments_count = None
+    share_count = None
+    ufi = currMedia_feedback.get("comet_ufi_summary_and_actions_renderer") or {}
+    for action in (ufi.get("feedback") or {}).get(
+        "adaptive_ufi_action_renderers", []
+    ):
+        if action.get("__typename") == "UFIStoryReactActionRenderer":
+            reaction_display_strategy = (
+                action.get("feedback", {}).get("reaction_display_config", {}).get("reaction_display_strategy")
+            )
+        if action.get("__typename") == "XFBUFIAdaptiveShareActionRenderer":
+            share_count = (
+                action.get("feedback", {}).get("share_count", {}).get("count")
+            )
+
+    comments_count = (
+        (currMedia_feedback.get("comment_list_renderer") or {})
+        .get("feedback", {})
+        .get("comment_rendering_instance", {})
+        .get("comments", {})
+        .get("total_count")
+    )
+
+    creation_story = data_currMedia.get("creation_story") or {}
+    container_story = data_currMedia.get("container_story") or {}
+    text = (creation_story.get("message") or {}).get("text")
+
+    group_id = None
+    target_group = creation_story.get("target_group")
+    if target_group is not None:
+        group_id=target_group.get("id")
+    return ParserMediaPost(
+        id=data_currMedia.get("id"),
+        url=currMedia.get("url"),
+        creation_time=data_currMedia.get("created_time"),
+        text=text,
+        author=ParserProfileRef(
+            id=owner.get("id"),
+            name=(currMedia.get("owner") or {}).get("name"),
+            profile_picture_url=((currMedia.get("owner") or {}).get("profile_picture") or {}).get("uri"),
+        ),
+        reactors_visible=(reaction_display_strategy == "NONE") if reaction_display_strategy else None,
+        reaction_count=(data_currMedia_feedback.get("reactors") or {}).get("count"),
+        comments_count=comments_count,
+        share_count=share_count,
+        media=ParserPhotoMedia(
+            id=data_currMedia.get("id"),
+            image_url=image.get("uri"),
+            creation_time=data_currMedia.get("created_time"),
+        ),
+        nextMediaAfterNodeId=((data.get("mediaset") or {}).get("nextMediaAfterNodeId") or {}).get("id"),
+        parent_post_id=container_story.get("post_id"),
+        group_id=group_id
+    )
+
+def parse_media_post_video(data) -> Optional[ParserMediaPost]:
+    """Parse a Video media viewer payload into a ParserMediaPost."""
+    data_currMedia = data.get("data", {}).get("currMedia")
+    currMedia = data.get("currMedia") or {}
+    if not data_currMedia:
+        return None
+
+    data_currMedia_creation_story = data_currMedia.get("creation_story") or {}
+    data_currMedia_container_story = data_currMedia.get("container_story") or {}
+
+    currMedia_creation_story = currMedia.get("creation_story") or {}
+    currMedia_container_story = currMedia.get("creation_story") or {}
+
+    actors = data_currMedia_creation_story.get("actors") or [{}]
+    a = actors[0]
+
+    thumbnail = (data_currMedia.get("preferred_thumbnail") or {}).get("image") or {}
+
+    video_url = None
+    for item in (
+        data_currMedia
+        .get("videoDeliveryResponseFragment", {})
+        .get("videoDeliveryResponseResult", {})
+        .get("progressive_urls", [])
+    ):
+        # loop and get the last one, the best one
+        if item.get("failure_reason") is None:
+            video_url = item.get("progressive_url", None)
+
+    # data_currMedia_feedback = data_currMedia.get("feedback") or {}
+    currMedia_feedback = currMedia.get("feedback") or {}
+    
+    reaction_count = None
+    share_count = None
+    ufi = (currMedia_feedback.get("comet_ufi_summary_and_actions_renderer") or {}).get("feedback", {})
+    for action in ufi.get("adaptive_ufi_action_renderers", []):
+        if action.get("__typename") == "UFIStoryReactActionRenderer":
+            reaction_count = action.get("feedback", {}).get("reaction_count", {}).get("count")
+        elif action.get("__typename") == "XFBUFIAdaptiveShareActionRenderer":
+            share_count = action.get("feedback", {}).get("share_count", {}).get("count")
+
+    comments_count = (
+        (currMedia_feedback.get("comment_list_renderer") or {})
+        .get("feedback", {})
+        .get("comment_rendering_instance", {})
+        .get("comments", {})
+        .get("total_count")
+    )
+
+    duration_ms = data_currMedia.get("playable_duration_in_ms")
+    length_in_second = round(duration_ms / 1000, 1) if duration_ms else None
+
+    video_creation_time = None
+    for m in (currMedia_creation_story.get("comet_sections") or {}).get("metadata", []):
+        if m.get("__typename") == "CometFeedStoryLongerTimestampStrategy":
+            video_creation_time = (m.get("story") or {}).get("creation_time")
+            break
+
+    post_creation_time = None
+    for m in (currMedia_container_story.get("comet_sections") or {}).get("metadata", []):
+        if m.get("__typename") == "CometFeedStoryLongerTimestampStrategy":
+            post_creation_time = (m.get("story") or {}).get("creation_time")
+            break
+
+    group_id = None
+    target_group = data_currMedia_creation_story.get("target_group")
+    if target_group is not None:
+        group_id=target_group.get("id")
+
+    return ParserMediaPost(
+        id=data_currMedia.get("id"),
+        url=currMedia.get("url"),
+        creation_time=post_creation_time,
+        text=(data_currMedia_creation_story.get("message") or {}).get("text"),
+        author=ParserProfileRef(
+            id=a.get("id"),
+            name=a.get("name"),
+            url=a.get("url"),
+            is_verified=a.get("is_verified"),
+        ),
+        reaction_count=reaction_count,
+        share_count=share_count,
+        comments_count=comments_count,
+        media=ParserVideoMedia(
+            id=data_currMedia.get("id"),
+            thumbnail_image_url=thumbnail.get("uri"),
+            video_url=video_url,
+            length_in_second=length_in_second,
+            creation_time=video_creation_time
+        ),
+        nextMediaAfterNodeId=((data.get("mediaset") or {}).get("nextMediaAfterNodeId") or {}).get("id"),
+        group_id=group_id,
+        parent_post_id=data_currMedia_creation_story.get("post_id")
+    )
+
+def parse_group_mediaset(data) -> Optional[ParserMediaPostsPage]:
+    node = data.get("data", {}).get("node", {})
+
+    mediaset = node.get("group_mediaset") or {}
+    media = mediaset.get("media") or {}
+    edges = media.get("edges", [])
+    raw_page_info = media.get("page_info", {})
+
+    group_id = node.get("id")
+
+    media_posts: List[ParserMediaPost] = []
+    for edge in edges:
+        media_node = (edge or {}).get("node") or {}
+        typename = media_node.get("__typename")
+        media_id = media_node.get("id")
+        owner = media_node.get("owner") or {}
+        image = media_node.get("image") or {}
+        story = media_node.get("creation_story") or {}
+
+        if typename == "Photo":
+            parsed_media = ParserPhotoMedia(
+                id=media_id,
+                image_url=image.get("uri"),
+            )
+        elif typename == "Video":
+            parsed_media = ParserVideoMedia(
+                id=media_id,
+                thumbnail_image_url=image.get("uri"),
+            )
+        else:
             continue
-        image = photo.get("image") or {}
-        photos.append(
-            {
-                "type": "photo",
-                "id": photo.get("id"),
-                "image_url": image.get("uri"),
-            }
+
+        media_posts.append(
+            ParserMediaPost(
+                id=media_id,
+                url=media_node.get("url"),
+                text=(story.get("message") or {}).get("text"),
+                group_id=group_id,
+                author=ParserProfileRef(id=owner.get("id")),
+                media=parsed_media,
+            )
         )
 
-    videos = []
-    for video in target.get("pre_recorded_videos") or []:
-        if not video:
-            continue
-        videos.append(
-            {
-                "type": "video",
-                "id": video.get("id", None),
-                "thumbnail_image_url": video.get("image").get("uri", None),
-                "playable_url": video.get("playable_url", None),
-                "playable_url_hd": video.get("playable_url_hd", None),
-            }
-        )
+    return ParserMediaPostsPage(
+        media_posts=media_posts,
+        page_info=ParserPageInfo(
+            has_next_page=raw_page_info.get("has_next_page", False),
+            end_cursor=raw_page_info.get("end_cursor"),
+        ),
+    )
 
-    media = {
-        "type": "marketplace_pdp_media",
-        "listing_id": listing_id,
-        "is_hidden": target.get("is_hidden"),
-        "photos": photos,
-        "videos": videos,
-    }
+def parse_facebook_payload(json_input) -> Optional[ParsedResponse]:
+    """Dispatch a Facebook GraphQL response to its matching parser by schema fingerprint."""
 
-    return {
-        "media": media,
-    }
-
-
-def parse_facebook_payload(json_input):
     if isinstance(json_input, str):
         data = json.loads(json_input)
     else:
@@ -2228,67 +1717,49 @@ def parse_facebook_payload(json_input):
     data_block = data.get("data", {})
     node_block = data_block.get("node", {})
 
-    # User Profile [Hovercard] [Less Detailed]
-    # if "comet_hovercard_renderer" in node_block and node_block.get("__typename") == "User":
-    #     return {
-    #         "type": "user_partial",
-    #         "parsed_data": parse_facebook_user_hovercard(data)
-    #     }
-
     # User Collection Ids
     if "profile_header_renderer" in data_block.get("user", {}):
-        return {
-            "operation": "ProfileCometHeaderQuery",
-            "parsed_data": parse_profile_collection_ids(data),
-        }
+        return ParsedResponse(
+            operation="ProfileCometHeaderQuery",
+            parsed_data=parse_profile_collection_ids(data),
+        )
 
     # User About Subtabs Info
     if "about_app_sections" in data_block.get("user", {}):
-        return {
-            "operation": "ProfileCometAboutAppSectionQuery",
-            "parsed_data": parse_about_collections(data),
-        }
-
-    # User summary
-    # if "timeline_list_feed_units" in (data.get('user') or data.get('data', {}).get('user') or {}):
-    #     return {
-    #         "type": "user_summary",
-    #         "parsed_data": parse_user_summary(data)
-    #     }
+        return ParsedResponse(
+            operation="ProfileCometAboutAppSectionQuery",
+            parsed_data=parse_about_collections(data),
+        )
 
     # Get User Posts (Paginable)
     if (
         node_block.get("__typename") == "User"
         and "timeline_list_feed_units" in node_block
     ):
-        return {
-            "operation": "ProfileCometTimelineFeedRefetchQuery",
-            "parsed_data": parse_facebook_timeline(data),
-        }
+        return ParsedResponse(
+            operation="ProfileCometTimelineFeedRefetchQuery",
+            parsed_data=parse_facebook_timeline(data),
+        )
 
     # Get Single Full Post
     if "node_v2" in data_block:
-        return {
-            "operation": "CometSinglePostDialogContentQuery",
-            "parsed_data": parse_post(data),
-        }
-
-    # Get Post Reactors (Less Detailed Reactors) [Hovercard]
-    # if "important_reactors" in (data_block.get("feedback") or {}):
-    #     return {
-    #         "type": "post_reactors_partial",
-    #         "parsed_data": parse_post_reactors_partial(data)
-    #     }
+        if data_block.get("node_v2") is None:
+            return None 
+        
+        return ParsedResponse(
+            operation="CometSinglePostDialogContentQuery",
+            parsed_data=parse_post(data),
+        )
 
     # Get Post Comments (Paginable)
     if (
         node_block.get("__typename") == "Feedback"
         and "comment_rendering_instance_for_feed_location" in node_block
     ):
-        return {
-            "operation": "CommentsListComponentsPaginationQuery",
-            "parsed_data": parse_facebook_comments(data),
-        }
+        return ParsedResponse(
+            operation="CommentsListComponentsPaginationQuery",
+            parsed_data=parse_facebook_comments(data),
+        )
 
     # Get Comment Replies (Paginable)
     if (
@@ -2297,135 +1768,137 @@ def parse_facebook_payload(json_input):
     ):
         edges = node_block.get("replies_connection").get("edges")
         if edges and "is_subreply_parent_deleted" in edges[0].get("node"):
-            return {
-                "operation": "Depth1CommentsListPaginationQuery",
-                "parsed_data": parse_comment_replies(data, comment_type="reply"),
-            }
+            return ParsedResponse(
+                operation="Depth1CommentsListPaginationQuery",
+                parsed_data=parse_comment_replies(data, comment_type="reply"),
+            )
         else:
-            return {
-                "operation": "Depth2CommentsListPaginationQuery",
-                "parsed_data": parse_comment_replies(data, comment_type="subreply"),
-            }
-
-    # Get Comment Reactors (Less Detailed Reactors) [Hovercard]
-    # if "top_reactions" in (data_block.get("feedback") or {}):
-    #     return {
-    #         "type": "comment_reactors_partial",
-    #         "parsed_data": parse_comment_reactors_partial(data)
-    #     }
+            return ParsedResponse(
+                operation="Depth2CommentsListPaginationQuery",
+                parsed_data=parse_comment_replies(data, comment_type="subreply"),
+            )
 
     # Get Post/Comments Reactors (Full Detailed Reactors) (Paginable)
     if (
         node_block.get("__typename") == "Feedback"
         and "reactors" in node_block
-        and not "top_reactions" in node_block
+        and "top_reactions" not in node_block
     ):
-        return {
-            "operation": "CometUFIReactionsDialogTabContentRefetchQuery",
-            "parsed_data": parse_reactors(data),
-        }
+        return ParsedResponse(
+            operation="CometUFIReactionsDialogTabContentRefetchQuery",
+            parsed_data=parse_reactors(data),
+        )
 
     # Group Hovercard Fingerprint
     if (
         "comet_hovercard_renderer" in node_block
         and node_block.get("__typename") == "Group"
     ):
-        return {
-            "operation": "CometHovercardQueryRendererQuery",
-            "parsed_data": parse_facebook_group_hovercard(data),
-        }
+        return ParsedResponse(
+            operation="CometHovercardQueryRendererQuery",
+            parsed_data=parse_facebook_group_hovercard(data),
+        )
 
     # Group Initial Page / Metadata Payload
     if "about_feed_units" in data_block.get("group", {}):
-        return {
-            "operation": "CometGroupAboutRootQuery",
-            "parsed_data": parse_group_about_info(data),
-        }
+        return ParsedResponse(
+            operation="CometGroupAboutRootQuery",
+            parsed_data=parse_group_about_info(data),
+        )
 
     # Group Timeline Feed
     if node_block.get("__typename") == "Group" and "group_feed" in node_block:
-        return {
-            "operation": "GroupsCometFeedRegularStoriesPaginationQuery",
-            "parsed_data": parse_facebook_group_timeline(data),
-        }
-
-    # Group Member Summary
-    # if "group_member_profiles" in data_block.get("group", {}):
-    #     return {
-    #         "type": "group_member_summary",
-    #         "parsed_data": parse_group_member_summary(data)
-    #     }
+        return ParsedResponse(
+            operation="GroupsCometFeedRegularStoriesPaginationQuery",
+            parsed_data=parse_facebook_group_timeline(data),
+        )
 
     # Group Member List (Paginable)
     if node_block.get("__typename") == "Group" and "new_members" in node_block:
-        return {
-            "operation": "GroupsCometMembersPageNewMembersSectionRefetchQuery",
-            "parsed_data": parse_group_members(data),
-        }
+        return ParsedResponse(
+            operation="GroupsCometMembersPageNewMembersSectionRefetchQuery",
+            parsed_data=parse_group_members(data),
+        )
+
     # TimelineAppCollection Collection: Followers, Followees, Friends, Reels, Photos
     if (
         node_block.get("__typename") == "TimelineAppCollection"
         and "pageItems" in node_block
     ):
-        return {
-            "operation": "ProfileCometAppCollectionListRendererPaginationQuery",
-            "parsed_data": parse_timeline_app_collection_page_items(data),
-        }
+        return ParsedResponse(
+            operation="ProfileCometAppCollectionListRendererPaginationQuery",
+            parsed_data=parse_timeline_app_collection_page_items(data),
+        )
 
     # TimelineAppCollection Collection: Reels (More details for Reels)
     if (
         node_block.get("__typename") == "TimelineAppCollection"
         and "aggregated_fb_shorts" in node_block
     ):
-        return {
-            "operation": "ProfileCometAppCollectionReelsRendererPaginationQuery",
-            "parsed_data": parse_timeline_app_collection_aggregated_fb_shorts(data),
-        }
-
-    # User Marketplace Listings (Paginable)
-    # if "marketplace_listing_sets" in node_block:
-    #     return {
-    #         "type": "user_marketplace",
-    #         "parsed_data": parse_user_marketplace(data)
-    #     }
+        return ParsedResponse(
+            operation="ProfileCometAppCollectionReelsRendererPaginationQuery",
+            parsed_data=parse_timeline_app_collection_aggregated_fb_shorts(data),
+        )
 
     if "marketplace_product_details_page" in (data_block.get("viewer", {}) or {}):
         pdp = data_block["viewer"]["marketplace_product_details_page"]
         target = (pdp or {}).get("target") or {}
 
-        # Media payload: has listing_photos / pre_recorded_videos
         if "listing_photos" in target or "pre_recorded_videos" in target:
-            return {
-                "operation": "MarketplacePDPC2CMediaViewerWithImagesQuery",
-                "parsed_data": parse_marketplace_pdp_media(data),
-            }
-
-        # Main PDP payload: has listing_price / marketplace_listing_title / story
+            return ParsedResponse(
+                operation="MarketplacePDPC2CMediaViewerWithImagesQuery",
+                parsed_data=parse_marketplace_pdp_media(data),
+            )
         else:
-            return {
-                "operation": "MarketplacePDPContainerQuery",
-                "parsed_data": parse_marketplace_pdp(data),
-            }
+            return ParsedResponse(
+                operation="MarketplacePDPContainerQuery",
+                parsed_data=parse_marketplace_pdp(data),
+            )
 
     if "serpResponse" in data_block:
-        return {
-            "operation": "SearchCometResultsPaginatedResultsQuery",
-            "parsed_data": parse_facebook_serp_search(data),
-        }
+        return ParsedResponse(
+            operation="SearchCometResultsPaginatedResultsQuery",
+            parsed_data=parse_facebook_serp_search(data),
+        )
 
     # Marketplace Search (Paginable)
     if "marketplace_search" in data_block:
-        return {
-            "operation": "CometMarketplaceSearchContentPaginationQuery",
-            "parsed_data": parse_marketplace_search(data),
-        }
+        return ParsedResponse(
+            operation="CometMarketplaceSearchContentPaginationQuery",
+            parsed_data=parse_marketplace_search(data),
+        )
+
+    # Photo MediaPost
+    if (data_block.get("currMedia") or {}).get("__typename") == "Photo":
+        return ParsedResponse(
+            operation="CometPhotoRootContentQuery",
+            parsed_data=parse_media_post_photo(data),
+        )
+
+    # Video MediaPost
+    if (data_block.get("currMedia") or {}).get("__typename") == "Video":
+        return ParsedResponse(
+            operation="CometPhotoRootContentQuery",
+            parsed_data=parse_media_post_video(data),
+        )
+
+    # Group media set (paginated photo gallery/ paginated video gallery)
+    if node_block.get("__typename") == "Group" and "group_mediaset" in node_block:
+        return ParsedResponse(
+            operation="GroupsCometMediaPhotosTabGridQuery/GroupsCometMediaVideosTabGridQuery",
+            parsed_data=parse_group_mediaset(data),
+        )
 
     # Unrecognized Schema
     return None
 
+def json_default(obj):
+    if isinstance(obj, BaseModel):
+        return obj.model_dump(exclude_none=True)
+    return str(obj)
 
 if __name__ == "__main__":
     with open("facebook2.json", "r", encoding="utf-8") as f:
         parsed_dict = parse_facebook_payload(f.read())
         with open("facebook4.json", "w", encoding="utf-8") as f:
-            json.dump(parsed_dict, f, indent=2, ensure_ascii=False)
+            json.dump(parsed_dict, f, indent=2, ensure_ascii=False, default=json_default)

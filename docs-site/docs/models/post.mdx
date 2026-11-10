@@ -48,35 +48,30 @@ The PFBID is resolved to an ID using regex matching. Prefer `from_post_id` when 
 **Engagement**
 
 <Props>
-  <Prop name="reaction_count" type="str | None">Total reactions as a display string, e.g. <code>"47619"</code>.</Prop>
+  <Prop name="reaction_count" type="int | None">Total number of reactions.</Prop>
   <Prop name="share_count" type="int | None">Number of shares.</Prop>
   <Prop name="comments_count" type="int | None">Number of comments.</Prop>
   <Prop name="reactors_visible" type="bool | None">Whether the list of reactors is public.</Prop>
-  <Prop name="top_reaction_breakdown" type="list[dict] | None">
-    Reaction counts grouped by type, as <code>{`{"id", "name", "count"}`}</code> entries.
-  </Prop>
 </Props>
 
 **Media**
 
 <Props>
-  <Prop
-    name="attachments"
+  <Prop name="media_posts_count" type="int | None">Number of media posts attached to this post.</Prop>
+  <Prop name="attachments"
     type={
       <>
         list[
-        <Link to="/models/photo">Photo</Link>
+        <Link to="/models/animated-image">AnimatedImage</Link>
         {' | '}
-        <Link to="/models/video">Video</Link>
-        {' | '}
-        <Link to="/models/generic-media">GenericMedia</Link>
+        <Link to="/models/external-link">ExternalLink</Link>
         {' | '}
         <Link to="/models/sticker">Sticker</Link>
-        ] | None
+        ]
       </>
     }
   >
-    Attached media.
+    Attachments on this post.
   </Prop>
 </Props>
 
@@ -89,9 +84,10 @@ The PFBID is resolved to an ID using regex matching. Prefer `from_post_id` when 
 
 ## Methods
 
-All methods return a [`PaginatedIterator`](/paginated-iterator) of model objects.
-
 <Props>
+  <Prop name="get_media_posts()" type="MediaPost" href="/models/media-post" iterator>
+    Every media post attached to this post.
+  </Prop>
   <Prop name="get_comments()" type="Comment" href="/models/comment" iterator>All comments on the post.</Prop>
   <Prop name="get_reactors()" type="Reactor" href="/models/reactor" iterator>Users who reacted to the post.</Prop>
 </Props>
@@ -103,7 +99,7 @@ import facebook_gql_scraper as fgs
 
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
-post = fgs.Post.from_user_id(context, user_id="253053527513133")
+post = fgs.Post.from_post_id(context, post_id="253053527513133")
 # Or from PFBID: post = fgs.Post.from_pfbid(ctx, pfbid="pfbid0qHZRZohg13A1DmZpkFvHr3yuv7y1heFNnNoijtvi5onn1ctx2sjM5rRgTMSh6EGql")
 
 for comment in post.get_comments():

@@ -47,7 +47,7 @@ The username is resolved to an ID using regex matching. Prefer `from_user_id` wh
   <Prop name="profile_picture_url" type="str | None">URL of the profile picture.</Prop>
   <Prop name="is_verified" type="bool | None">Whether the account has a verified badge.</Prop>
   <Prop name="followers_count" type="str | None">Follower count as a display string, e.g. <code>"6.9k"</code>.</Prop>
-  <Prop name="following_count" type="str | None">Following count as a display string, e.g. <code>"6.9k"</code>.</Prop>
+  <Prop name="followees_count" type="str | None">Followees (following) count as a display string, e.g. <code>"6.9k"</code>.</Prop>
   <Prop name="friends_count" type="str | None">Friend count as a display string, e.g. <code>"4"</code>.</Prop>
 </Props>
 
@@ -134,12 +134,10 @@ The username is resolved to an ID using regex matching. Prefer `from_user_id` wh
 
 ## Methods
 
-All methods return a [`PaginatedIterator`](/paginated-iterator) of model objects.
-
 <Props>
-  <Prop name="get_posts()" type="Post" href="/models/post" iterator>User's posts.</Prop>
-  <Prop name="get_photos()" type="Photo" href="/models/photo" iterator>User's photos.</Prop>
-  <Prop name="get_videos()" type="Video" href="/models/video" iterator>User's videos / reels.</Prop>
+  <Prop name="get_posts()" type="PostBase" href="/models/post-base" iterator>User's posts.</Prop>
+  <Prop name="get_photo_posts()" type="MediaPost[Photo]" href="/models/media-post" iterator>User's photo posts (each wraps a <Link to="/models/photo">Photo</Link>).</Prop>
+  <Prop name="get_video_posts()" type="MediaPost[Video]" href="/models/media-post" iterator>User's video posts / reels (each wraps a <Link to="/models/video">Video</Link>).</Prop>
   <Prop name="get_followers()" type="Profile" href="/models/profile" iterator>Users following this user.</Prop>
   <Prop name="get_followees()" type="Profile" href="/models/profile" iterator>Users this user follows.</Prop>
   <Prop name="get_friends_followers()" type="Profile" href="/models/profile" iterator>Friends of the user who also follow them.</Prop>

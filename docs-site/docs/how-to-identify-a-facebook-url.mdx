@@ -1,0 +1,83 @@
+---
+id: how-to-identify-a-facebook-url
+title: How to Identify a Facebook URL
+sidebar_label: Identify a Facebook URL
+slug: /how-to-identify-a-facebook-url
+---
+
+import Link from '@docusaurus/Link';
+
+# How to Identify a Facebook URL
+
+Find your Facebook URL below to see which identifier to extract and which factory method to call.
+
+## Profile
+
+A Facebook user profile.
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/Ishowspeed | Ishowspeed | <Link to="/models/profile">Profile.from_username</Link> |
+| https://www.facebook.com/profile.php?id=100084254631043 | 100084254631043 | <Link to="/models/profile">Profile.from_user_id</Link> |
+
+## Post
+
+A container post. May hold zero or more media posts.
+
+```
+Post  https://www.facebook.com/Ishowspeed/posts/pfbid03879gxtiUxMyVbeyVFB9Vi8bT5poFwEY49j175X2pnYWAtn2bwrc3xnPJ5zDpABBal
+  │
+  ├─ MediaPost  https://www.facebook.com/photo/?fbid=1109890145162796
+  │
+  ├─ MediaPost  https://www.facebook.com/reel/1109890215162789/
+  │
+  └─ MediaPost  https://www.facebook.com/100084254631043/videos/pcb.1109890215162789/1172936348430690
+```
+
+Each Post and each MediaPost has its own comment section. The example above has 4 comment sections.
+
+**From a pfbid URL**
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/johndoe/posts/pfbid0qHZ... | pfbid0qHZ... | <Link to="/models/post">Post.from_pfbid</Link> |
+
+**From a numeric id URL**
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/johndoe/posts/253053527513133 | 253053527513133 | <Link to="/models/post">Post.from_post_id</Link> |
+| https://www.facebook.com/groups/2781022932139267/permalink/253617361590909 | 253617361590909 | <Link to="/models/post">Post.from_post_id</Link> |
+| https://www.facebook.com/permalink.php?story_fbid=253053527513133&id=100084254631043 | 253053527513133 | <Link to="/models/post">Post.from_post_id</Link> |
+
+:::note
+If you have a numeric id but don't know whether it belongs to a Post or a MediaPost, use <Link to="/models/post-base">PostBase.from_any_id</Link>. It tries `Post.from_post_id` first, then falls back to `MediaPost.from_media_post_id`.
+:::
+
+## MediaPost
+
+A single media item (photo or video) that is its own post, with its own comments, reactions, and permalink.
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/photo/?fbid=1109890145162796&set=a.132038323554140 | 1109890145162796 | <Link to="/models/media-post">MediaPost.from_media_post_id</Link> |
+| https://www.facebook.com/reel/1109890145162796/ | 1109890145162796 | <Link to="/models/media-post">MediaPost.from_media_post_id</Link> |
+| https://www.facebook.com/johndoe/videos/1109890145162796/ | 1109890145162796 | <Link to="/models/media-post">MediaPost.from_media_post_id</Link> |
+| https://www.facebook.com/Ishowspeed/videos/pcb.1109890215162789/1172936348430690 | 1172936348430690 | <Link to="/models/media-post">MediaPost.from_media_post_id</Link> |
+
+## Group
+
+A Facebook group.
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/groups/workingmemes | workingmemes | <Link to="/models/group">Group.from_groupname</Link> |
+| https://www.facebook.com/groups/2781022932139267 | 2781022932139267 | <Link to="/models/group">Group.from_group_id</Link> |
+
+## MarketplaceListing
+
+A Marketplace listing.
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/marketplace/item/1234567890123456 | 1234567890123456 | <Link to="/models/marketplace-listing">MarketplaceListing.from_listing_id</Link> |

@@ -1,0 +1,126 @@
+---
+id: post-base
+title: PostBase
+sidebar_label: PostBase
+slug: /models/post-base
+---
+
+import Link from '@docusaurus/Link';
+import { Props, Prop } from '@site/src/components/Props';
+
+# PostBase
+
+The common base for [`Post`](/models/post) and [`MediaPost`](/models/media-post).
+
+`PostBase` is never instantiated directly. It appears wherever the SDK returns an item that could be **either** a `Post` or a `MediaPost` — for example [`Profile.get_posts()`](/models/profile#methods) and [`Group.get_posts()`](/models/group#methods).
+
+## Creating
+
+<code className="signature">PostBase.from_any_id(context: <Link to="/facebook-context">FacebookContext</Link>, any_post_id: str) -> <Link to="/models/post">Post</Link> | <Link to="/models/media-post">MediaPost</Link></code>
+
+:::note
+Internally tries [`Post.from_post_id()`](/models/post) first, falls back to [`MediaPost.from_media_post_id()`](/models/media-post) on [`InvalidIdTypeError`](/exceptions#usage-errors) — cost up to **two** HTTP requests. If you already know the kind, call the specific factory directly.
+:::
+
+## Properties
+
+**Identity**
+
+<Props>
+  <Prop name="id" type="str">Post ID.</Prop>
+  <Prop name="creation_time" type="int | None">Unix timestamp of when the post was created.</Prop>
+  <Prop name="url" type="str | None">Facebook URL of the post.</Prop>
+  <Prop name="text" type="str | None">Body text of the post.</Prop>
+</Props>
+
+**Engagement**
+
+<Props>
+  <Prop name="reaction_count" type="int | None">Total number of reactions.</Prop>
+  <Prop name="share_count" type="int | None">Number of shares.</Prop>
+  <Prop name="comments_count" type="int | None">Number of comments.</Prop>
+  <Prop name="reactors_visible" type="bool | None">Whether the list of reactors is public.</Prop>
+</Props>
+
+**Related**
+
+<Props>
+  <Prop name="owner" type="Profile | None" href="/models/profile">The profile that authored the post.</Prop>
+  <Prop name="group" type="Group | None" href="/models/group">The group the post belongs to, if any.</Prop>
+</Props>
+
+## Methods
+
+Instance methods that fetch collections return a [`PaginatedIterator`](/paginated-iterator) of model objects.
+
+<Props>
+  <Prop name="get_comments()" type="Comment" href="/models/comment" iterator>All comments on the post.</Prop>
+  <Prop name="get_reactors()" type="Reactor" href="/models/reactor" iterator>Users who reacted to the post.</Prop>
+</Props>
+
+## Subclass-specific fields
+
+**`Post` only**
+
+<Props>
+  <Prop name="title" type="str | None">Optional title, when the post has one.</Prop>
+  <Prop name="media_posts" type={<>list[<Link to="/models/media-post">MediaPost</Link>]</>}>
+    Media posts already present in the post payload.
+  </Prop>
+  <Prop name="media_posts_count" type="int | None">Total number of media posts attached to this post.</Prop>
+  <Prop name="get_media_posts()" type="MediaPost" href="/models/media-post" iterator>
+    The complete paginated list of media posts attached to this post.
+  </Prop>
+  <Prop
+    name="attachments"
+    type={
+        <>
+        list[
+        <Link to="/models/animated-image">AnimatedImage</Link>
+        {' | '}
+        <Link to="/models/external-link">ExternalLink</Link>
+        {' | '}
+        <Link to="/models/sticker">Sticker</Link>
+        ]
+        </>
+    }
+    >
+    Non-media-post attachments on this post.
+  </Prop>
+</Props>
+
+**`MediaPost` only**
+
+<Props>
+    <Prop
+    name="media"
+    type={
+        <>
+        <Link to="/models/photo">Photo</Link>
+        {' | '}
+        <Link to="/models/video">Video</Link>
+        {' | None'}
+        </>
+    }
+    >
+    The single media object wrapped by this post.
+  </Prop>
+  <Prop name="post" type="Post | None" href="/models/post">The parent container post, if any.</Prop>
+</Props>
+
+## Example
+
+Resolve an id without knowing whether it is a post or a media post:
+
+```python
+import facebook_gql_scraper as fgs
+
+context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
+
+item = fgs.PostBase.from_any_id(context, "1477518704237899")
+
+if isinstance(item, fgs.MediaPost):
+    print("media post:", item.id, item.media)
+elif isinstance(item, fgs.Post):
+    print("post:", item.id, item.text)
+```

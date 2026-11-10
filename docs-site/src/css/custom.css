@@ -15,6 +15,7 @@
 /* Top-level pages */
 .menu__link[href$="/"]::before { content: "home"; }
 .menu__link[href$="/quickstart"]::before { content: "bolt"; }
+.menu__link[href$="/how-to-identify-a-facebook-url"]::before { content: "link"; }
 .menu__link[href$="/facebook-context"]::before { content: "key"; }
 .menu__link[href$="/paginated-iterator"]::before { content: "autorenew"; }
 .menu__link[href$="/search-engine"]::before { content: "search"; }
@@ -22,13 +23,16 @@
 
 /* Models */
 .menu__link[href$="/models/profile"]::before { content: "person"; }
+.menu__link[href$="/models/post-base"]::before { content: "description"; }
 .menu__link[href$="/models/post"]::before { content: "article"; }
+.menu__link[href$="/models/media-post"]::before { content: "perm_media"; }
 .menu__link[href$="/models/comment"]::before { content: "comment"; }
 .menu__link[href$="/models/group"]::before { content: "groups"; }
 .menu__link[href$="/models/marketplace-listing"]::before { content: "storefront"; }
 .menu__link[href$="/models/photo"]::before { content: "image"; }
 .menu__link[href$="/models/video"]::before { content: "movie"; }
-.menu__link[href$="/models/generic-media"]::before { content: "link"; }
+.menu__link[href$="/models/animated-image"]::before { content: "gif_box"; }
+.menu__link[href$="/models/external-link"]::before { content: "open_in_new"; }
 .menu__link[href$="/models/sticker"]::before { content: "emoji_emotions"; }
 .menu__link[href$="/models/group-member"]::before { content: "badge"; }
 .menu__link[href$="/models/reactor"]::before { content: "thumb_up"; }

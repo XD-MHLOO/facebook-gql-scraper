@@ -1,0 +1,102 @@
+---
+id: media-post
+title: MediaPost
+sidebar_label: MediaPost
+slug: /models/media-post
+---
+
+import Tabs from '@theme/Tabs';
+import TabItem from '@theme/TabItem';
+import Link from '@docusaurus/Link';
+import { Props, Prop } from '@site/src/components/Props';
+
+# MediaPost
+
+A Facebook media post — One [`Photo`](/models/photo) or [`Video`](/models/video) that is its own post, with its own comments and reactions.
+
+MediaPost can be created with:
+
+<Tabs>
+<TabItem value="id" label="From media post ID" default>
+
+<code className="signature">MediaPost.from_media_post_id(context: <Link to="/facebook-context">FacebookContext</Link>, media_post_id: str) -> <Link to="/models/media-post">MediaPost</Link></code>
+
+</TabItem>
+</Tabs>
+
+## Properties
+
+**Identity**
+
+<Props>
+  <Prop name="id" type="str">Media post ID.</Prop>
+  <Prop name="creation_time" type="int | None">Unix timestamp of when the media post was created.</Prop>
+  <Prop name="url" type="str | None">Facebook permalink of the media post.</Prop>
+  <Prop name="text" type="str | None">Caption / body text of the media post.</Prop>
+</Props>
+
+**Engagement**
+
+<Props>
+  <Prop name="reaction_count" type="int | None">Total number of reactions.</Prop>
+  <Prop name="share_count" type="int | None">Number of shares.</Prop>
+  <Prop name="comments_count" type="int | None">Number of comments.</Prop>
+  <Prop name="reactors_visible" type="bool | None">Whether the list of reactors is public.</Prop>
+</Props>
+
+**Media**
+
+<Props>
+  <Prop
+    name="media"
+    type={
+      <>
+        <Link to="/models/photo">Photo</Link>
+        {' | '}
+        <Link to="/models/video">Video</Link>
+        {' | None'}
+      </>
+    }
+  >
+    The single media object wrapped by this post.
+  </Prop>
+</Props>
+
+**Related**
+
+<Props>
+  <Prop name="post" type="Post | None" href="/models/post">The parent post that contains this media post, if known.</Prop>
+  <Prop name="owner" type="Profile | None" href="/models/profile">The profile that owns the media post.</Prop>
+  <Prop name="group" type="Group | None" href="/models/group">The group the media post belongs to, if any.</Prop>
+</Props>
+
+## Methods
+
+Instance methods that fetch collections return a [`PaginatedIterator`](/paginated-iterator) of model objects.
+
+<Props>
+  <Prop name="get_comments()" type="Comment" href="/models/comment" iterator>Comments on this media post.</Prop>
+  <Prop name="get_reactors()" type="Reactor" href="/models/reactor" iterator>Users who reacted to this media post.</Prop>
+</Props>
+
+## Example
+
+```python
+import facebook_gql_scraper as fgs
+from itertools import islice
+
+context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
+
+# Fetch a media post directly by ID
+mp = fgs.MediaPost.from_media_post_id(context, media_post_id="1109890145162796")
+print(mp.id, mp.url)
+m = mp.media
+if isinstance(m, fgs.Photo):
+    print(f"Photo: id={m.id} image_url={m.image_url}")
+elif isinstance(m, fgs.Video):
+    print(f"Video: id={m.id} video_url={m.video_url}")
+
+for c in islice(mp.get_comments(), 10):
+    print(c.text)
+
+```

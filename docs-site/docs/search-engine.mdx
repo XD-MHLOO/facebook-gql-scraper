@@ -22,12 +22,14 @@ SearchEngine can be created with:
 
 <Props>
   <Prop
-    name="search(query, filter_type, exact_match)"
+    name="search(text, filter_type='all', exact_match=False)"
     type={
       <>
         <Link to="/models/profile">Profile</Link>
         {' | '}
         <Link to="/models/post">Post</Link>
+        {' | '}
+        <Link to="/models/media-post">MediaPost</Link>
         {' | '}
         <Link to="/models/group">Group</Link>
       </>
@@ -39,28 +41,32 @@ SearchEngine can be created with:
 </Props>
 
 <Props>
-  <Prop name="filter_type" type="str"><code>"all"</code>, <code>"profile"</code>, <code>"post"</code>, or <code>"group"</code>. <code>"all"</code> yields a mix of <code>Profile</code>, <code>Post</code>, and <code>Group</code>.</Prop>
+  <Prop name="filter_type" type="str"><code>"all"</code>, <code>"profile"</code>, <code>"post"</code>, or <code>"group"</code>. <code>"all"</code> yields a mix of <code>Profile</code>, <code>Post</code>, <code>MediaPost</code>, and <code>Group</code>.</Prop>
   <Prop name="exact_match" type="bool"><code>True</code> requires an exact match. Defaults to <code>False</code> (fuzzy matching).</Prop>
 </Props>
 
 ### search_marketplace
 
 <Props>
-<Prop name="search_marketplace(query, is_stock_available, filter_location_latitude, filter_location_longitude, filter_price_lower_bound, filter_price_upper_bound, filter_radius_km, item_condition, last_n_days, sort_by)">
+  <Prop
+    name="search_marketplace(query, *, ...)"
+    type={<Link to="/models/marketplace-listing">MarketplaceListing</Link>}
+    iterator
+  >
     Search Marketplace listings.
   </Prop>
 </Props>
 
 <Props>
-  <Prop name="is_stock_available" type="bool">Restrict to in-stock items.</Prop>
-  <Prop name="filter_location_latitude" type="float">Latitude of the search center.</Prop>
-  <Prop name="filter_location_longitude" type="float">Longitude of the search center.</Prop>
-  <Prop name="filter_price_lower_bound" type="int">Minimum price.</Prop>
-  <Prop name="filter_price_upper_bound" type="int">Maximum price.</Prop>
-  <Prop name="filter_radius_km" type="int">Search radius in kilometers.</Prop>
-  <Prop name="item_condition" type="str">Item condition: <code>"new"</code>, <code>"used_like_new"</code>, <code>"used_good"</code>, or <code>"used_fair"</code>.</Prop>
-  <Prop name="last_n_days" type="int">Only include listings posted within the last N days.</Prop>
-  <Prop name="sort_by" type="str">Sort order: <code>"PRICE_DESCEND"</code>, <code>"PRICE_ASCEND"</code>, <code>"DISTANCE_ASCEND"</code>, or <code>"CREATION_TIME_DESCEND"</code>.</Prop>
+  <Prop name="is_stock_available" type="bool">Restrict to in-stock items. Defaults to <code>True</code>.</Prop>
+  <Prop name="filter_location_latitude" type="float">Latitude of the search center. Defaults to <code>40.7128</code>.</Prop>
+  <Prop name="filter_location_longitude" type="float">Longitude of the search center. Defaults to <code>-74.0060</code>.</Prop>
+  <Prop name="filter_price_lower_bound" type="int">Minimum price. Defaults to <code>0</code>.</Prop>
+  <Prop name="filter_price_upper_bound" type="int">Maximum price. Defaults to <code>2147483647</code>.</Prop>
+  <Prop name="filter_radius_km" type="int">Search radius in kilometers. Defaults to <code>500</code>.</Prop>
+  <Prop name="item_condition" type="str | None">Item condition: <code>"new"</code>, <code>"used_like_new"</code>, <code>"used_good"</code>, or <code>"used_fair"</code>.</Prop>
+  <Prop name="last_n_days" type="int | None">Only include listings posted within the last N days.</Prop>
+  <Prop name="sort_by" type="str | None">Sort order: <code>"CREATION_TIME_DESCEND"</code>, <code>"PRICE_DESCEND"</code>, <code>"PRICE_ASCEND"</code>, or <code>"DISTANCE_ASCEND"</code>.</Prop>
 </Props>
 
 ## Example
@@ -74,5 +80,7 @@ engine = fgs.SearchEngine(context)
 
 for profile in engine.search("Ishowspeed", filter_type="profile", exact_match=True):
     print(profile.id, profile.name)
-```
 
+for listing in engine.search_marketplace("iphone", filter_price_upper_bound=500):
+    print(listing.id, listing.title, listing.price)
+```

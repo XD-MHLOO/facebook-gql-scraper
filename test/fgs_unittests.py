@@ -17,6 +17,8 @@ PROFILE_ID = "100044296486382"
 # FRIENDS_PROFILE_ID = "123"
 
 POST_ID = "2397851114308533"
+MEDIA_POST_ID = "1109890145162796"
+
 COMMENT_ID = "2398004820959829"
 
 GROUP_ID = "2781022932139267"
@@ -61,27 +63,36 @@ class TestFacebook(unittest.TestCase):
 
         self.assertTrue(len(posts) > 0)
 
-    def test_profile_photos(self):
+    def test_profile_photo_posts(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
-        photos = []
-        for i, photo in enumerate(user.get_photos()):
-            photos.append(photo)
+        photo_posts = []
+        for i, mp in enumerate(user.get_photo_posts()):
+            photo_posts.append(mp)
             if i >= MAX_PHOTOS - 1:
                 break
 
-        self.assertTrue(len(photos) > 0)
+        self.assertTrue(len(photo_posts) > 0)
 
-    def test_profile_videos(self):
+        for mp in photo_posts:
+            self.assertIsInstance(mp, fgs.MediaPost)
+            self.assertIsInstance(mp.media, fgs.Photo)
+
+
+    def test_profile_video_posts(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
 
-        videos = []
-        for i, video in enumerate(user.get_videos()):
-            videos.append(video)
+        video_posts = []
+        for i, mp in enumerate(user.get_video_posts()):
+            video_posts.append(mp)
             if i >= MAX_VIDEOS - 1:
                 break
 
-        self.assertTrue(len(videos) > 0)
+        self.assertTrue(len(video_posts) > 0)
+
+        for mp in video_posts:
+            self.assertIsInstance(mp, fgs.MediaPost)
+            self.assertIsInstance(mp.media, fgs.Video)
 
     def test_profile_followees(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
@@ -157,6 +168,82 @@ class TestFacebook(unittest.TestCase):
                 break
 
         self.assertTrue(len(reactors) > 0)
+
+    # ========================================================
+    # MediaPost
+    # ========================================================
+
+
+
+    def test_media_post(self):
+
+        mp = fgs.MediaPost.from_media_post_id(self.fbContext, media_post_id=MEDIA_POST_ID)
+
+        self.assertIsNotNone(mp)
+        self.assertEqual(mp.id, MEDIA_POST_ID)
+        self.assertIsNotNone(mp.media)
+        self.assertIn(
+            type(mp.media).__name__,
+            {"Photo", "Video"},
+        )
+
+
+    def test_media_post_comments(self):
+        """MediaPost.get_comments() yields Comment objects."""
+        mp = fgs.MediaPost.from_media_post_id(self.fbContext, media_post_id=MEDIA_POST_ID)
+
+        comments = []
+        for i, c in enumerate(mp.get_comments()):
+            comments.append(c)
+            if i >= MAX_COMMENTS - 1:
+                break
+
+        # Media posts may legitimately have 0 comments; only assert types
+        for c in comments:
+            self.assertIsInstance(c, fgs.Comment)
+            self.assertIsNotNone(c.id)
+
+
+    def test_media_post_reactors(self):
+        mp = fgs.MediaPost.from_media_post_id(self.fbContext, media_post_id=MEDIA_POST_ID)
+
+        reactors = []
+        for i, r in enumerate(mp.get_reactors()):
+            reactors.append(r)
+            if i >= MAX_REACTORS - 1:
+                break
+
+        for r in reactors:
+            self.assertIsInstance(r, fgs.Reactor)
+
+
+    def test_media_post_parent_post(self):
+        mp = fgs.MediaPost.from_media_post_id(self.fbContext, media_post_id=MEDIA_POST_ID)
+
+        # Parent post may or may not be exposed depending on the payload
+        if mp.post is None:
+            self.skipTest("MediaPost has no parent post exposed.")
+
+        self.assertIsInstance(mp.post, fgs.Post)
+        self.assertIsNotNone(mp.post.id)
+
+
+    def test_post_media_posts(self):
+        post = fgs.Post.from_post_id(self.fbContext, post_id=POST_ID)
+
+        media_posts = list(post.get_media_posts())
+
+        if not media_posts:
+            self.skipTest("Post has no media posts.")
+
+        for mp in media_posts:
+            self.assertIsInstance(mp, fgs.MediaPost)
+            self.assertIsNotNone(mp.id)
+            self.assertIsNotNone(mp.media)
+            self.assertIn(
+                type(mp.media).__name__,
+                {"Photo", "Video"},
+            )
 
     # ========================================================
     # Comment

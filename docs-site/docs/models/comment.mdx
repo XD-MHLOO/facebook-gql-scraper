@@ -17,8 +17,8 @@ A Facebook comment.
 <Props>
   <Prop name="id" type="str">Comment ID.</Prop>
   <Prop name="text" type="str | None">Body text of the comment.</Prop>
-  <Prop name="created_time" type="int | None">Unix timestamp of when the comment was created.</Prop>
-  <Prop name="reaction_count" type="str | None">Number of reactions on the comment.</Prop>
+  <Prop name="creation_time" type="int | None">Unix timestamp of when the comment was created.</Prop>
+  <Prop name="reaction_count" type="int | None">Number of reactions on the comment.</Prop>
   <Prop name="reply_count" type="int | None">Number of direct replies.</Prop>
   <Prop
     name="attachments"
@@ -29,7 +29,9 @@ A Facebook comment.
         {' | '}
         <Link to="/models/video">Video</Link>
         {' | '}
-        <Link to="/models/generic-media">GenericMedia</Link>
+        <Link to="/models/animated-image">AnimatedImage</Link>
+        {' | '}
+        <Link to="/models/external-link">ExternalLink</Link>
         {' | '}
         <Link to="/models/sticker">Sticker</Link>
         ] | None
@@ -39,12 +41,22 @@ A Facebook comment.
     Attached media.
   </Prop>
   <Prop name="owner" type="Profile | None" href="/models/profile">The comment's author.</Prop>
-  <Prop name="post" type="Post | None" href="/models/post">The parent post.</Prop>
+  <Prop
+    name="post"
+    type={
+      <>
+        <Link to="/models/post">Post</Link>
+        {' | '}
+        <Link to="/models/media-post">MediaPost</Link>
+        {' | None'}
+      </>
+    }
+  >
+    The parent post or media post.
+  </Prop>
 </Props>
 
 ## Methods
-
-All methods return a [`PaginatedIterator`](/paginated-iterator) of model objects.
 
 <Props>
   <Prop name="get_replies()" type="Comment" href="/models/comment" iterator>Direct replies to the comment.</Prop>

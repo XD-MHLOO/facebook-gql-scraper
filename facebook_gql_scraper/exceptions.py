@@ -24,7 +24,9 @@ class ProfileNotFoundError(FacebookNotFoundError):
 class PostNotFoundError(FacebookNotFoundError):
     """The post was not found on Facebook."""
 
-
+class MediaPostNotFoundError(FacebookNotFoundError):
+    """The media post was not found on Facebook."""
+    
 class GroupNotFoundError(FacebookNotFoundError):
     """The group was not found on Facebook."""
 
@@ -75,7 +77,19 @@ class DtsgTokenFetchError(FacebookGqlScraperException):
 
 class SchemaChangedError(FacebookGqlScraperException):
     """Facebook's GraphQL schema for an operation changed — variables no longer match."""
-    
-# Invalid usage  
-class MissingParentError(FacebookGqlScraperException):
+
+class EmptyNodeError(FacebookGqlScraperException):
+    """Facebook return empty node response."""
+
+# ---------- invalid usage ----------
+
+class InvalidUsageError(FacebookGqlScraperException, ValueError):
+    """The SDK was called incorrectly (bad value, missing required parent, …)."""
+
+
+class MissingParentError(InvalidUsageError):
     """A model needs its parent, but none was provided."""
+
+
+class InvalidIdTypeError(InvalidUsageError):
+    """The provided id belongs to a different entity type than the one requested."""

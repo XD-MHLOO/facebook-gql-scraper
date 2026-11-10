@@ -10,14 +10,17 @@ from .exceptions import *
 from .structures import (
     Photo as Photo,
     Video as Video,
-    GenericMedia as GenericMedia,
+    AnimatedImage as AnimatedImage,
+    ExternalLink as ExternalLink, 
     Sticker as Sticker,
     GroupMember as GroupMember,
     Reactor as Reactor,
     FrozenPaginatedIterator as FrozenPaginatedIterator,
     PaginatedIterator as PaginatedIterator,
     FacebookModel as FacebookModel,
+    PostBase as PostBase,
     Post as Post,
+    MediaPost as MediaPost,
     Profile as Profile,
     Comment as Comment,
     Group as Group,
@@ -31,7 +34,10 @@ from .facebookGraphql import (
 
 from .facebookConsolidater import consolidate_jsonl as consolidate_jsonl
 
-from .unifiedFacebookParser import parse_facebook_payload as parse_facebook_payload
+from .unifiedFacebookParser import (
+    parse_facebook_payload as parse_facebook_payload,
+    json_default as json_default
+)
 
 from .facebookNoiseRemoval import (
     remove_raw_facebook_json_noise as remove_raw_facebook_json_noise,

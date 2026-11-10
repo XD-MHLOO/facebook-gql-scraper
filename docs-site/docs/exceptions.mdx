@@ -36,6 +36,9 @@ Base class for all errors raised by this library.
   <Prop name="DtsgTokenFetchError" type="Exception">
     Failed to obtain the fb_dtsg token. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
   </Prop>
+  <Prop name="EmptyNodeError" type="Exception">
+    Facebook returned an empty node response — usually transient server glitch. Raised only after the automatic retry also came back empty. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
+  </Prop>
 </Props>
 
 ## Not found errors
@@ -49,6 +52,9 @@ Base class for all errors raised by this library.
   </Prop>
   <Prop name="PostNotFoundError" type="Exception">
     The post was not found. <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
+  </Prop>
+  <Prop name="MediaPostNotFoundError" type="Exception">
+    The media post was not found. <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
   </Prop>
   <Prop name="GroupNotFoundError" type="Exception">
     The group was not found. <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
@@ -90,8 +96,14 @@ Base class for all errors raised by this library.
 ## Usage errors
 
 <Props>
+  <Prop name="InvalidUsageError" type="Exception">
+    Base for errors caused by incorrect API usage. Also inherits `ValueError`. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
+  </Prop>
   <Prop name="MissingParentError" type="Exception">
-    A model needs its parent, but none was provided — e.g. `Comment.get_replies()` without a parent `Post`. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
+    A model needs its parent, but none was provided. <br /> Inherits [`InvalidUsageError`](#usage-errors).
+  </Prop>
+  <Prop name="InvalidIdTypeError" type="Exception">
+    The id belongs to a different entity type — e.g. a media post id passed to `Post.from_post_id()`. <br /> Inherits [`InvalidUsageError`](#usage-errors).
   </Prop>
 </Props>
 

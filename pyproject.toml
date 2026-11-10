@@ -1,6 +1,6 @@
 [project]
 name = "facebook-gql-scraper"
-version = "0.8.4"
+version = "0.9.0"
 description = "Scrape Facebook GraphQL data without an API key — profiles, posts, comments, reactions, groups, marketplace, search_engine."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -9,6 +9,7 @@ dependencies = [
     "iso4217parse>=0.6.2",
     "mini-racer>=0.14.1",
     "price-parser>=0.5.1",
+    "pydantic>=2.14.3",
     "requests>=2.31.0",
 ]
 

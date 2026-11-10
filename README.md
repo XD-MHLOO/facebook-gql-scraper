@@ -58,6 +58,8 @@ Export your Facebook session cookies as JSON and save them as
 - Firefox: [Cookie-Editor](https://addons.mozilla.org/en-US/firefox/addon/cookie-editor/)
 - Windows: [EditThisCookie (V3)](https://chromewebstore.google.com/detail/ojfebgpkimhlhcblbalbfjblapadhbol?utm_source=item-share-cb)
 
+See [How to Identify a Facebook URL](https://XD-MHLOO.github.io/facebook-gql-scraper/how-to-identify-a-facebook-url) if you don't know how to find the identifier from a Facebook URL.
+
 ## Profile
 
 ```python
@@ -83,7 +85,7 @@ user.profile_picture_url # "https://scontent...jpg"
 user.is_verified        # False
 
 user.followers_count    # '123'
-user.following_count    # '6.9k'
+user.followees_count    # '6.9k'
 user.friends_count      # '4'
 
 ## About / bio
@@ -151,17 +153,17 @@ user.business_hours     # "Mon-Fri: 6am-7pm"
 ### Profile methods
 
 ```python
-# User's posts → Post
+# User's posts → Post or MediaPost
 for post in user.get_posts():
     print(post.id, post.text)
 
-# User's photos → Photo
-for photo in user.get_photos():
-    print(photo.id, photo.image_url)
+# User's photo posts → MediaPost[Photo]
+for mp in user.get_photo_posts():
+    print(mp.id, mp.media.image_url)
 
-# User's videos/reels → Video
-for video in user.get_videos():
-    print(video.id, video.url, video.play_count)
+# User's video posts (reels) → MediaPost[Video]
+for mp in user.get_video_posts():
+    print(mp.id, mp.media.video_url, mp.media.play_count)
 
 # Users following this user → Profile
 for follower in user.get_followers():
@@ -200,20 +202,15 @@ post.title                  # None
 post.text                   # "Thank you for all the prayers <3"
 
 ## Engagement
-post.reaction_count         # "47619"
+post.reaction_count         # 47619
 post.share_count            # 2380
 post.comments_count         # 1676
 
 post.reactors_visible       # True
-post.top_reaction_breakdown # [
-                            #     {"id": "1635855486666999", "name": "Haha", "count": 21197},
-                            #     {"id": "1678524932434102", "name": "Like", "count": 17562},
-                            #     {"id": "867209233497706",  "name": "Love", "count": 6761},
-                            #     ...
-                            # ]
 
 ## Media
-post.attachments            # [Photo(id="123", image_url="https://...", url="https://...")]
+post.media_posts_count      # 3
+post.attachments            # [AnimatedImage, ExternalLink, Sticker]
 
 ## Related models
 post.owner                  # Profile(id="100044296486382", name="Cristiano Ronaldo", ...)
@@ -223,6 +220,10 @@ post.group                  # Group   (the group the post belongs to, if any)
 ### Post methods
 
 ```python
+# All media post on the post if any → MediaPost
+for media_post in post.get_media_posts():
+    print(media_post.id, media_post.media)
+
 # All comments on the post → Comment
 for comment in post.get_comments():
     print(comment.id, comment.text)
@@ -231,7 +232,52 @@ for comment in post.get_comments():
 for reactor in post.get_reactors():
     print(reactor.reaction_type_id, reactor.profile.name)
 ```
+---
 
+## MediaPost
+
+A `MediaPost`is a post that wraps one media (photo, video, etc.), with its own comments and reactions.
+
+```python
+mp = fgs.MediaPost.from_media_post_id(ctx, media_post_id="1109890145162796")
+print(mp.reaction_count)
+```
+
+### MediaPost properties
+
+```python
+## Identity
+mp.id                    # "1109890145162796"
+mp.creation_time         # 1793815721
+mp.url                   # "https://www.facebook.com/reel/1104956379211700/"
+mp.text                  # ""
+
+## Engagement
+mp.reaction_count        # 221
+mp.share_count           # 0
+mp.comments_count        # 10
+mp.reactors_visible      # False
+
+## Media
+mp.media                 # Photo | Video | None
+
+## Related
+mp.post                  # Post (parent post, or None)
+mp.owner                 # Profile (media post author)
+mp.group                 # Group   (the group the media post belongs to, if any)
+```
+
+### MediaPost methods
+
+```python
+# Comments on the media post → Comment
+for comment in mp.get_comments():
+    print(comment.id, comment.text)
+
+# Users who reacted to the media post → Reactor
+for reactor in mp.get_reactors():
+    print(reactor.reaction_type_id, reactor.profile.name)
+```
 ---
 
 ## Comment
@@ -243,13 +289,13 @@ A `Comment` may be a top-level comment on a post, or a reply to another comment.
 ```python
 comment.id                 # "1234567898767876"
 comment.text               # "Nice!!"
-comment.created_time       # 1790291800
+comment.creation_time      # 1790291800
 comment.reaction_count     # 12
 comment.reply_count        # 3
 
-comment.attachments        # [Photo(id="...", image_url="https://...")]
+comment.attachments        # [Photo, Video, AnimatedImage, ExternalLink, Sticker]
 comment.owner              # Profile(id="...", name="John Doe", ...)
-comment.post               # Post(id="1086837787662153", ...)
+comment.post               # Post or MediaPost
 ```
 
 ### Comment methods
@@ -284,21 +330,28 @@ print(group.name)
 group.id                # "2781022932139267"
 group.name              # "Working Memes"
 group.url               # "https://www.facebook.com/groups/workingmemes"
-group.privacy           # "PUBLIC"
 group.member_count      # "1.2M members"
 group.profile_picture_url # "https://scontent...jpg"
-group.created_time      # 1456789012
+group.creation_time     # 1456789012
 group.description       # "Memes for the working class."
-group.privacy_info      # "Public group"
-group.discoverability_info # "Anyone can find this group"
+group.privacy_info      # "Public"
+group.discoverability_info # "Visible"
 ```
 
 ### Group methods
 
 ```python
-# Group's posts → Post
+# Group's posts → Post or MediaPost
 for post in group.get_posts():
     print(post.id, post.text)
+
+# Group's photo posts → MediaPost[Photo]
+for mp in group.get_photo_posts():
+    print(mp.id, mp.media.image_url)
+
+# Group's video posts → MediaPost[Video]
+for mp in group.get_video_posts():
+    print(mp.id, mp.media.video_url, mp.media.length_in_second)
 
 # Group's members → GroupMember
 for member in group.get_members():
@@ -309,7 +362,7 @@ for member in group.get_members():
 ## MarketplaceListing
 
 ```python
-listing = fgs.MarketplaceListing.from_listing_id(ctx, id="123456789876789")
+listing = fgs.MarketplaceListing.from_listing_id(ctx, listing_id="123456789876789")
 print(listing.product_details_type)
 ```
 A listing is one of two types, indicated by `product_details_type`:
@@ -362,8 +415,8 @@ listing.messaging_enabled       # True                             (FOR_SALE_ITE
 
 ## Media
 listing.listing_photos          # [
-                                #     Photo(id="3477221012465782", image_url="https://...jpg", url=None),
-                                #     Photo(id="2159451611596036", image_url="https://...jpg", url=None),
+                                #     Photo(id="3477221012465782", image_url="https://...jpg"),
+                                #     Photo(id="2159451611596036", image_url="https://...jpg"),
                                 # ]
 
 listing.videos                  # [Video(id="...", thumbnail_image_url="https://...", video_url="https://...")]
@@ -372,9 +425,9 @@ listing.videos                  # [Video(id="...", thumbnail_image_url="https://
 seller = listing.seller
 
 seller.profile.id                      # "123451234512345"
-seller.profile.name                    # "OneEvolutionarydawn"
+seller.profile.name                    # "Dawg"
 seller.profile.profile_picture_url     # "https://...jpg"
-seller.profile.joined_time             # 1615703350
+seller.joined_time                     # 1615703350
 seller.is_verified                     # False
 seller.seller_ratings_are_private      # False
 seller.seller_ratings_average          # 5.0
@@ -387,7 +440,7 @@ seller.combined_ratings_count          # 24
 partner = listing.partner_seller
 
 partner.profile.id                     # "1033819751641974"
-partner.profile.name                   # "RICKS HOLLYWOOD"
+partner.profile.name                   # "RICKS"
 partner.profile.profile_picture_url    # None
 partner.partner_brand_name             # "eBay"
 partner.seller_review_count            # 12903
@@ -416,9 +469,9 @@ for item in it:
     print(item.id, item.name)
 
 # filter_type: "all" | "profile" | "post" | "group"
-#   "all"      → yields Profile, Post, Group
+#   "all"      → yields Profile, Post, MediaPost, Group
 #   "profile"  → yields Profile
-#   "post"     → yields Post
+#   "post"     → yields Post, MediaPost
 #   "group"    → yields Group
 ```
 
@@ -463,7 +516,7 @@ For example, `get_followers()` returns full `Profile` objects:
 ```python
 for follower in user.get_followers():
     # Properties: follower.name, follower.gender, follower.is_verified, etc.
-    # Methods: follower.get_posts(), follower.get_photos(), etc.
+    # Methods: follower.get_posts(), follower.get_photo_posts(), etc.
 
 ```
 ###  Pagination — freeze / thaw

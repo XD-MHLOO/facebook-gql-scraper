@@ -10,13 +10,14 @@ import requests
 
 from . import __version__
 from .facebookConsolidater import consolidate_jsonl
-from .unifiedFacebookParser import parse_facebook_payload
+from .unifiedFacebookParser import parse_facebook_payload, json_default
 from .exceptions import (
     DocIdStillInvalidError,
     DtsgTokenStillInvalidError,
     DtsgTokenFetchError,
     SessionExpiredError,
     SchemaChangedError,
+    EmptyNodeError
 )
 from .facebookNoiseRemoval import remove_raw_facebook_json_noise
 from .facebookOperationDiscovery import FacebookOperationDiscovery
@@ -198,6 +199,16 @@ class FacebookContext:
         for msg in messages:
             if "GraphQL document with ID" in msg and "was not found" in msg:
                 return "doc_id"
+
+        # soft failure: HTTP 200, no errors, but the node is null
+        if not messages:
+            if (
+                set(data.keys()) == {"data", "extensions"}
+                and data["data"] == {"node": None}
+                and data["extensions"].get("is_final") is True
+            ):
+                return "empty_node"
+                
         return None
 
     # ------------------------------------------------------------------
@@ -336,7 +347,7 @@ class FacebookContext:
             raise SessionExpiredError("Facebook Cookies are expired.")
         return response
 
-    def post(self, operation_name, reference_page_url, variables, _retry=True):
+    def post(self, operation_name, reference_page_url, variables, _retried_count=0):
         """
         Send a GraphQL request for the given operation.
 
@@ -364,13 +375,6 @@ class FacebookContext:
         if self._check_session_dead(response):
             raise SessionExpiredError("Facebook Cookies are expired.")
 
-        if self.debug:
-            self.debug_response(
-                operation_name,
-                doc_id,
-                response,
-            )
-
         reason = self._classify_error(response)
 
         # --- schema changed: not recoverable ---
@@ -386,25 +390,28 @@ class FacebookContext:
             )
 
         # --- doc-id rotation ---
-        if _retry and reason == "doc_id":
+        if reason == "doc_id":
+            if _retried_count >= 1:
+                raise DocIdStillInvalidError(
+                    f"'{operation_name}' doc id still invalid after re-discovery."
+                )
             self.progress("Facebook rotated the doc_id. Re-discovering ...")
             logger.info("doc_id invalid for %s", operation_name)
             self._invalidate_doc_id(operation_name, reference_page_url)
 
-            retry_response = self.post(
+            return self.post(
                 operation_name,
                 reference_page_url,
                 variables,
-                _retry=False,
+                _retried_count=_retried_count + 1,
             )
-            if self._classify_error(retry_response) == "doc_id":
-                raise DocIdStillInvalidError(
-                    f"'{operation_name}' doc id still invalid after re-discovery."
-                )
-            return retry_response
 
         # --- dtsg rejection ---
-        if _retry and self._is_dtsg_invalid(response):
+        if self._is_dtsg_invalid(response):
+            if _retried_count >= 1:
+                raise DtsgTokenStillInvalidError(
+                    "still invalid after using a new fb_dstg token."
+                )
             self.fb_dtsg = None
             self.progress("Refreshing fb_dtsg token ...")
             logger.info("Facebook rejected fb_dtsg, refreshing from error response")
@@ -412,20 +419,38 @@ class FacebookContext:
             refreshed = self._refresh_dtsg_from_response(response)
             if not refreshed and self._get_fb_dtsg() is None:
                 raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
-            
-            retry_response = self.post(
+                
+            return self.post(
                 operation_name,
                 reference_page_url,
                 variables,
-                _retry=False,
+                _retried_count=_retried_count + 1,
             )
 
-            if self._is_dtsg_invalid(retry_response):
-                raise DtsgTokenStillInvalidError(
-                    "still invalid after using a new fb_dstg token."
+        # --- soft failure: rate-limit / transient server glitch ---
+        if reason == "empty_node":
+            if _retried_count >= 10:
+                raise EmptyNodeError(
+                    f"'{operation_name}' still returns empty data after "
+                    f"{_retried_count} retries. Possible transient server error."
                 )
-            return retry_response
-            
+            self.progress("Facebook returned empty node. Retrying with backoff ...")
+            logger.info("empty node response for %s — retrying", operation_name)
+
+            return self.post(
+                operation_name,
+                reference_page_url,
+                variables,
+                _retried_count=_retried_count + 1,
+            )
+
+        if self.debug:
+            self.debug_response(
+                operation_name,
+                doc_id,
+                response,
+            )
+
         return response
 
     def parse_graphql_response(self, raw):
@@ -493,7 +518,11 @@ class FacebookContext:
                 json.dump(noise_removed_json, f, indent=2, ensure_ascii=False)
 
             # ---- 5. Parse (only if consolidate succeeded) ----
-            parsed = parse_facebook_payload(consolidated_json)
+            try:
+                parsed = parse_facebook_payload(consolidated_json)
+            except Exception as e:
+                logger.info(f"Parsed failed: {e}")
+                parsed = None
         else:
             logger.warning(
                 "Failed to consolidate (%s); saving request/response only.", operation_name
@@ -521,7 +550,7 @@ class FacebookContext:
             self.debug_dir, f"{operation_name}_{doc_id}_parsed.json"
         )
         with open(filepath_parsed, "w", encoding="utf-8") as f:
-            json.dump(debug_data, f, indent=2, ensure_ascii=False)
+            json.dump(debug_data, f, indent=2, ensure_ascii=False, default=json_default)
 
         logger.info("GraphQL debug data saved: %s", filepath_parsed)
 
@@ -724,6 +753,7 @@ class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
         "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
         "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
         "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
         "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
@@ -768,6 +798,7 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
         "focusCommentID": None,
         "privacySelectorRenderLocation": "COMET_STREAM",
         "renderLocation": "permalink",
+        "referringStoryRenderLocation": None,
         "scale": 1,
         "shouldChangeNodeFieldName": True,
         "storyID": None,
@@ -791,13 +822,14 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
         "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
         "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
         "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
         "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
         "__relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider": True,
         "__relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider": 206,
         "__relay_internal__pv__StoriesShouldEnablePhotosensitiveContentWarningrelayprovider": False,
-        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": False,
+        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": True,
         "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
         "__relay_internal__pv__ProfileCometSeoIsViewerLoggedOutrelayprovider": False,
         "__relay_internal__pv__CometSinglePostDialogContent_isFloatingCTAEnabledrelayprovider": False,
@@ -840,9 +872,13 @@ class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
-    def send(self, postId: str, commentsAfterCursor: str = None):
+    def send(self, feedbackParts: list[str], commentsAfterCursor: str = None):
+        # example of feedbackParts: [parentpostid, mediapostid]
         variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(f"feedback:{postId}".encode()).decode()
+        variables = dict(self.VARIABLES)
+        variables["id"] = base64.b64encode(
+            f"feedback:{'_'.join(feedbackParts)}".encode()
+        ).decode()
         if commentsAfterCursor is not None:
             variables["commentsAfterCount"] = -1
             variables["commentsAfterCursor"] = commentsAfterCursor
@@ -1046,6 +1082,7 @@ class GroupsCometFeedRegularStoriesPaginationQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
         "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
         "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
         "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
         "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
@@ -1147,6 +1184,7 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
         "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
         "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
         "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
         "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
@@ -1296,11 +1334,14 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
         "shouldFetchLoggedOutSimilarListings": False,
         "targetId": None,
         "useDefaultActor": False,
+        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False,
         "__relay_internal__pv__MarketplacePDPCometSimilarListingsrelayprovider": False,
         "__relay_internal__pv__MarketplacePDPShouldShowRelatedSearchesrelayprovider": True,
         "__relay_internal__pv__MarketplacePDPShouldShowLoggedOutSellerTrustrelayprovider": False,
         "__relay_internal__pv__ShouldUpdateMarketplaceBoostListingBoostedStatusrelayprovider": False,
+        "__relay_internal__pv__MarketplacePDPShouldFetchSellerInforelayprovider": False,
         "__relay_internal__pv__MarketplacePDPIsLoggedOutrelayprovider": False,
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
         "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
         "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
         "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
@@ -1341,3 +1382,89 @@ class MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL(FacebookGraphQL):
         variables = dict(self.VARIABLES)
         variables["targetId"] = marketListingId
         return super().send(variables)
+
+
+class CometPhotoRootContentQueryGraphQL(FacebookGraphQL):
+    """Media Post Details"""
+
+    OPERATION_NAME = (
+        "CometPhotoRootContentQuery_facebookRelayOperation"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometPhotoRoot.react"
+
+    VARIABLES = {
+        "feedbackSource": 65,
+        "feedLocation": "COMET_MEDIA_VIEWER",
+        "privacySelectorRenderLocation": "COMET_MEDIA_VIEWER",
+        "renderLocation": "comet_media_viewer",
+        "useDefaultActor": False,
+        "isMediaset": True,
+        "mediasetToken": None,
+        "nodeID": None,
+        "scale": 1,
+        "focusCommentID": None,
+        "glbFileURIHackToRenderAs3D_DO_NOT_USE": None,
+        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
+        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
+        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
+        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+        "__relay_internal__pv__IsWorkUserrelayprovider": False,
+        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
+        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
+        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
+        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
+        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
+        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False
+    }
+
+    def send(self, mediaPostId: str, postId: str = None):
+        variables = dict(self.VARIABLES)
+        variables["nodeID"] = mediaPostId
+        if postId:
+            variables["mediasetToken"] = f"pcb.{postId}"
+        return super().send(variables)
+
+
+class GroupsCometMediaPhotosTabGridQueryGraphQL(FacebookGraphQL):
+    """Media Post Details"""
+
+    OPERATION_NAME = (
+        "GroupsCometMediaPhotosTabGridQuery_facebookRelayOperation"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometPhotosRoot.react"
+
+    VARIABLES = {
+        "count": 65,
+        "cursor": None,
+        "scale": 1,
+        "id": None,
+    }
+
+    def send(self, groupId: str, cursor: str = None):
+        variables = dict(self.VARIABLES)
+        variables["id"] = groupId
+        variables["cursor"] = cursor
+        return super().send(variables)
+
+
+class GroupsCometMediaVideosTabGridQueryGraphQL(FacebookGraphQL):
+    """Media Post Details"""
+
+    OPERATION_NAME = (
+        "GroupsCometMediaVideosTabGridQuery_facebookRelayOperation"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometVideosRoot.react"
+
+    VARIABLES = {
+        "count": 65,
+        "cursor": None,
+        "scale": 1,
+        "id": None,
+    }
+
+    def send(self, groupId: str, cursor: str = None):
+        variables = dict(self.VARIABLES)
+        variables["id"] = groupId
+        variables["cursor"] = cursor
+        return super().send(variables)
+

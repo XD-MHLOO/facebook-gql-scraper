@@ -39,21 +39,22 @@ The groupname is resolved to an ID using regex matching. Prefer `from_group_id` 
   <Prop name="id" type="str">Group ID.</Prop>
   <Prop name="name" type="str | None">Group name.</Prop>
   <Prop name="url" type="str | None">Group URL.</Prop>
-  <Prop name="privacy" type="str | None">Privacy level, e.g. <code>"PUBLIC"</code>.</Prop>
   <Prop name="member_count" type="str | None">Member count as a display string, e.g. <code>"1.2M members"</code>.</Prop>
   <Prop name="profile_picture_url" type="str | None">URL of the group picture.</Prop>
-  <Prop name="created_time" type="int | None">Unix timestamp of when the group was created.</Prop>
+  <Prop name="creation_time" type="int | None">Unix timestamp of when the group was created.</Prop>
   <Prop name="description" type="str | None">Group description.</Prop>
-  <Prop name="privacy_info" type="str | None">Human-readable privacy summary.</Prop>
-  <Prop name="discoverability_info" type="str | None">Human-readable discoverability summary.</Prop>
+  <Prop name="privacy_info" type="str | None">Group privacy level, e.g. <code>"Public"</code></Prop>
+  <Prop name="discoverability_info" type="str | None">Discoverability Info, e.g. <code>"Visible"</code></Prop>
 </Props>
 
 ## Methods
 
-All methods return a [`PaginatedIterator`](/paginated-iterator) of model objects.
+Instance methods that fetch collections return a [`PaginatedIterator`](/paginated-iterator) of model objects.
 
 <Props>
-  <Prop name="get_posts()" type="Post" href="/models/post" iterator>Posts in the group.</Prop>
+  <Prop name="get_posts()" type="PostBase" href="/models/post-base" iterator>Posts in the group.</Prop>
+  <Prop name="get_photo_posts()" type="MediaPost[Photo]" href="/models/media-post" iterator>Photo media in the group's media tab.</Prop>
+  <Prop name="get_video_posts()" type="MediaPost[Video]" href="/models/media-post" iterator>Video media (reels) in the group's media tab.</Prop>
   <Prop name="get_members()" type="GroupMember" href="/models/group-member" iterator>Members of the group.</Prop>
 </Props>
 
