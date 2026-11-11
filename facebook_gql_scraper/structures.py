@@ -14,7 +14,6 @@ from .facebookGraphql import (
     CometSinglePostDialogContentQueryGraphQL,
     CommentsListComponentsPaginationQueryGraphQL,
     Depth1CommentsListPaginationQueryGraphQL,
-    Depth2CommentsListPaginationQueryGraphQL,
     CometUFIReactionsDialogTabContentRefetchQueryGraphQL,
     CometHovercardQueryRendererQueryGraphQL,
     CometGroupAboutRootQueryGraphQL,
@@ -616,12 +615,12 @@ class PostBase(FacebookModel):
 
     # ---------- shared paginated endpoints ----------
 
-    def _feedback_id(self) -> list[str]:
+    @property
+    def _feedback_id(self) -> Optional[str]:
         """
-        Return the feedback ID parts: ``[parent_post_id, media_post_id]`` when a
-        parent post exists, otherwise ``[media_post_id]``.
+        Return the feedback ID. (Base64 encoded "feedback:pfbid...")
         """
-        return [self._field("id")]
+        return self._field("feedback_id")
 
     # ---------- parents ----------
 
@@ -707,11 +706,10 @@ class PostBase(FacebookModel):
         :rtype: PaginatedIterator[Comment]
         """
         comments_graphql = CommentsListComponentsPaginationQueryGraphQL(self._context)
-        feedback_parts = self._feedback_id()
 
         def request_fn(cursor):
             return comments_graphql.send(
-                feedbackParts=feedback_parts,
+                feedbackId=self._feedback_id,
                 commentsAfterCursor=cursor,
             ).text
 
@@ -734,7 +732,7 @@ class PostBase(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="comments",
-            query_variables={"postId": self.id},
+            query_variables={"feedbackId": self._feedback_id},
         )
 
     def get_reactors(self) -> PaginatedIterator["Reactor"]:
@@ -748,9 +746,8 @@ class PostBase(FacebookModel):
 
         def request_fn(cursor):
             return reactors_graphql.send(
-                postId=self._field("id"),
+                feedbackId=self._feedback_id,
                 reactionID=None,
-                itemType="post",
                 cursor=cursor,
             ).text
 
@@ -775,7 +772,7 @@ class PostBase(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="reactors",
-            query_variables={"postId": self.id, "type": "post"},
+            query_variables={"feedbackId": self._feedback_id},
         )
     
 M = TypeVar("M", Photo, Video)
@@ -822,18 +819,6 @@ class MediaPost(PostBase, Generic[M]):
         self._data.update(media_post.model_dump(exclude_none=True))
         
         self._full_fetched = True
-
-    def _feedback_id(self) -> list[str]:
-        parts: list[str] = []
-        parent = self._field("parent_post_id")
-        if parent and self.post.media_posts_count == 1:
-            return[parent]
-        else: 
-            return [self._field("id")]
-        # if parent:
-        #     parts.append(parent)
-        # parts.append(self._field("id"))
-        # return parts
     
     # ---------- media ----------
 
@@ -2286,6 +2271,13 @@ class Comment(FacebookModel):
         return self._field("reply_count")
 
     @property
+    def _feedback_id(self) -> Optional[str]:
+        """
+        Return the feedback ID. (Base64 encoded "feedback:pfbid...")
+        """
+        return self._field("feedback_id")
+
+    @property
     def _reply_expansion_token(self) -> Optional[str]:
         """
         Token used to retrieve replies to the comment.
@@ -2317,16 +2309,14 @@ class Comment(FacebookModel):
             return PaginatedIterator.empty(
                 iterator_type="comment_replies",
                 query_variables={
-                    "postId": self.post.id,
-                    "commentId": self.id,
+                    "feedbackId": self._feedback_id,
                     "expansionToken": self._reply_expansion_token,
                 },
             )
 
         def request_fn(cursor):
             return comment_replies_graphql.send(
-                postId=self.post.id,
-                commentId=self.id,
+                feedbackId=self._feedback_id,
                 expansionToken=self._reply_expansion_token,
                 repliesAfterCursor=cursor,
             ).text
@@ -2356,8 +2346,7 @@ class Comment(FacebookModel):
             item_wrapper=item_wrapper,
             iterator_type="comment_replies",
             query_variables={
-                "postId": self.post.id,
-                "commentId": self.id,
+                "feedbackId": self._feedback_id,
                 "expansionToken": self._reply_expansion_token,
             },
         )
@@ -2381,10 +2370,8 @@ class Comment(FacebookModel):
 
         def request_fn(cursor):
             return reactors_graphql.send(
-                postId=self.post.id,
+                feedbackId=self._feedback_id,
                 reactionID=None,
-                commentId=self.id,
-                itemType="comment",
                 cursor=cursor,
             ).text
 
@@ -2420,11 +2407,8 @@ class Comment(FacebookModel):
             page_wrapper=page_wrapper,
             item_wrapper=item_wrapper,
             iterator_type="reactors",
-            query_variables={
-                "postId": self.post.id,
-                "commentId": self.id,
-                "type": "comment",
-            },
+            query_variables={"feedbackId": self._feedback_id},
+
         )
 
     @property

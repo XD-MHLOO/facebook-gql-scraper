@@ -372,6 +372,14 @@ class FacebookContext:
         response = self.session.post(
             "https://web.facebook.com/api/graphql/", data=payload
         )
+
+        if self.debug:
+            self.debug_response(
+                operation_name,
+                doc_id,
+                response,
+            )
+        
         if self._check_session_dead(response):
             raise SessionExpiredError("Facebook Cookies are expired.")
 
@@ -442,13 +450,6 @@ class FacebookContext:
                 reference_page_url,
                 variables,
                 _retried_count=_retried_count + 1,
-            )
-
-        if self.debug:
-            self.debug_response(
-                operation_name,
-                doc_id,
-                response,
             )
 
         return response
@@ -872,13 +873,10 @@ class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
         "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
-    def send(self, feedbackParts: list[str], commentsAfterCursor: str = None):
-        # example of feedbackParts: [parentpostid, mediapostid]
+    def send(self, feedbackId: str, commentsAfterCursor: str = None):
         variables = dict(self.VARIABLES)
         variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(
-            f"feedback:{'_'.join(feedbackParts)}".encode()
-        ).decode()
+        variables["id"] = feedbackId
         if commentsAfterCursor is not None:
             variables["commentsAfterCount"] = -1
             variables["commentsAfterCursor"] = commentsAfterCursor
@@ -910,61 +908,57 @@ class Depth1CommentsListPaginationQueryGraphQL(FacebookGraphQL):
 
     def send(
         self,
-        postId: str,
-        commentId: str,
+        feedbackId: str,
         expansionToken: str,
         repliesAfterCursor: str = None,
     ):
         variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(
-            f"feedback:{postId}_{commentId}".encode()
-        ).decode()
+        variables["id"] = feedbackId
         variables["expansionToken"] = expansionToken
-        variables["focusCommentID"] = commentId
         if repliesAfterCursor is not None:
             variables["repliesAfterCount"] = -1
             variables["repliesAfterCursor"] = repliesAfterCursor
         return super().send(variables)
 
 
-class Depth2CommentsListPaginationQueryGraphQL(FacebookGraphQL):
-    """Comment sub-replies — second-level replies, paginated."""
+# class Depth2CommentsListPaginationQueryGraphQL(FacebookGraphQL):
+#     """Comment sub-replies — second-level replies, paginated."""
 
-    OPERATION_NAME = "Depth2CommentsListPaginationQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
-    VARIABLES = {
-        "clientKey": None,
-        "expansionToken": None,
-        "feedLocation": "POST_PERMALINK_DIALOG",
-        "id": None,
-        "scale": 1,
-        "subRepliesAfterCount": None,
-        "subRepliesAfterCursor": None,
-        "subRepliesBeforeCount": None,
-        "subRepliesBeforeCursor": None,
-        "useDefaultActor": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-    }
+#     OPERATION_NAME = "Depth2CommentsListPaginationQuery_facebookRelayOperation"
+#     REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
+#     VARIABLES = {
+#         "clientKey": None,
+#         "expansionToken": None,
+#         "feedLocation": "POST_PERMALINK_DIALOG",
+#         "id": None,
+#         "scale": 1,
+#         "subRepliesAfterCount": None,
+#         "subRepliesAfterCursor": None,
+#         "subRepliesBeforeCount": None,
+#         "subRepliesBeforeCursor": None,
+#         "useDefaultActor": False,
+#         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
+#         "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
+#         "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
+#         "__relay_internal__pv__IsWorkUserrelayprovider": False,
+#     }
 
-    def send(
-        self,
-        postId: str,
-        commentId: str,
-        expansionToken: str,
-        subRepliesAfterCursor: str = None,
-    ):
-        variables = dict(self.VARIABLES)
-        variables["id"] = base64.b64encode(
-            f"feedback:{postId}_{commentId}".encode()
-        ).decode()
-        variables["expansionToken"] = expansionToken
-        if subRepliesAfterCursor is not None:
-            variables["subRepliesAfterCount"] = -1
-            variables["subRepliesAfterCursor"] = subRepliesAfterCursor
-        return super().send(variables)
+#     def send(
+#         self,
+#         postId: str,
+#         commentId: str,
+#         expansionToken: str,
+#         subRepliesAfterCursor: str = None,
+#     ):
+#         variables = dict(self.VARIABLES)
+#         variables["id"] = base64.b64encode(
+#             f"feedback:{postId}_{commentId}".encode()
+#         ).decode()
+#         variables["expansionToken"] = expansionToken
+#         if subRepliesAfterCursor is not None:
+#             variables["subRepliesAfterCount"] = -1
+#             variables["subRepliesAfterCursor"] = subRepliesAfterCursor
+#         return super().send(variables)
 
 
 class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
@@ -985,19 +979,13 @@ class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
 
     def send(
         self,
-        postId: str,
+        feedbackId: str,
         reactionID: str = None,
         cursor: str = None,
-        commentId: str = None,
-        itemType="post",
     ):
         variables = dict(self.VARIABLES)
-        target_id = (
-            f"feedback:{postId}" if itemType == "post" else f"feedback:{postId}_{commentId}"
-        )
-        encoded = base64.b64encode(target_id.encode()).decode()
-        variables["feedbackTargetID"] = encoded
-        variables["id"] = encoded
+        variables["feedbackTargetID"] = feedbackId
+        variables["id"] = feedbackId
         if reactionID is not None:
             variables["reactionID"] = reactionID
         if cursor is not None:

@@ -354,7 +354,7 @@ wheels = [
 
 [[package]]
 name = "facebook-gql-scraper"
-version = "0.9.0.dev2"
+version = "0.9.0"
 source = { editable = "." }
 dependencies = [
     { name = "iso4217parse" },

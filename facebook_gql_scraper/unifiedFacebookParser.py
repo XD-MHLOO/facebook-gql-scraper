@@ -638,7 +638,8 @@ def parse_post(data) -> ParserPost:
         comments_count=comment_data.get("total_count", None),
         media_posts_count=media_posts_count,
         media_posts=media_posts,
-        group_id=group_id
+        group_id=group_id,
+        feedback_id=node_v2.get("feedback").get("id"),
     )
 
 def parse_reactors(data) -> ParserReactorsPage:
@@ -733,6 +734,7 @@ def parse_facebook_comments(data) -> ParserCommentsPage:
                     profile_picture_url=(author.get("profile_picture_depth_0") or {}).get("uri"),
                 ),
                 post_id=post_id,
+                feedback_id=node.get("feedback").get("id"),
             )
         )
         
@@ -807,8 +809,10 @@ def parse_comment_replies(data, comment_type="reply") -> ParserRepliesPage:
                     name=comment_direct_parent.get("author", {}).get("name"),
                     gender=comment_direct_parent.get("author", {}).get("gender"),
                 ),
+                feedback_id=node.get("id"),
             ),
             post_id=post_id,
+            feedback_id=reply_node.get("feedback").get("id"),
         )
 
         if comment_type == "reply":
@@ -1557,7 +1561,8 @@ def parse_media_post_photo(data) -> Optional[ParserMediaPost]:
         ),
         nextMediaAfterNodeId=((data.get("mediaset") or {}).get("nextMediaAfterNodeId") or {}).get("id"),
         parent_post_id=container_story.get("post_id"),
-        group_id=group_id
+        group_id=group_id,
+        feedback_id=data_currMedia_feedback.get("id"),
     )
 
 def parse_media_post_video(data) -> Optional[ParserMediaPost]:
@@ -1589,7 +1594,7 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
         if item.get("failure_reason") is None:
             video_url = item.get("progressive_url", None)
 
-    # data_currMedia_feedback = data_currMedia.get("feedback") or {}
+    data_currMedia_feedback = data_currMedia.get("feedback") or {}
     currMedia_feedback = currMedia.get("feedback") or {}
     
     reaction_count = None
@@ -1652,7 +1657,8 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
         ),
         nextMediaAfterNodeId=((data.get("mediaset") or {}).get("nextMediaAfterNodeId") or {}).get("id"),
         group_id=group_id,
-        parent_post_id=data_currMedia_creation_story.get("post_id")
+        parent_post_id=data_currMedia_creation_story.get("post_id"),
+        feedback_id=data_currMedia_feedback.get("id"),
     )
 
 def parse_group_mediaset(data) -> Optional[ParserMediaPostsPage]:

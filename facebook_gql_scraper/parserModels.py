@@ -173,6 +173,7 @@ class ParserPostBase(_Base):
     share_count: Optional[int] = None
     creation_time: Optional[int] = None
     group_id: Optional[str] = None
+    feedback_id: Optional[str] = None
 
 class ParserMediaPost(ParserPostBase):
     type: Literal["media_post"] = "media_post"
@@ -212,6 +213,7 @@ class ParserComment(_Base):
     author: Optional[ParserProfileRef] = None
     post_id: Optional[str] = None
     parent_comment: Optional["ParserComment"] = None
+    feedback_id: Optional[str] = None
 
 
 ParserMediaPost.model_rebuild()
