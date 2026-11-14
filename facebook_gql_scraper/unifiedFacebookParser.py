@@ -666,6 +666,7 @@ def parse_reactors(data) -> ParserReactorsPage:
         reactors.append(
             ParserReactor(
                 reaction_type_id=edge.get("feedback_reaction_info", {}).get("id"),
+                reaction_type=edge.get("feedback_reaction_info", {}).get("reaction_type"),
                 author=ParserProfileRef(
                     id=user_node.get("id"),
                     name=user_node.get("name"),

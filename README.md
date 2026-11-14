@@ -230,7 +230,7 @@ for comment in post.get_comments():
 
 # Users who reacted to the post → Reactor
 for reactor in post.get_reactors():
-    print(reactor.reaction_type_id, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.name)
 ```
 ---
 
@@ -276,7 +276,7 @@ for comment in mp.get_comments():
 
 # Users who reacted to the media post → Reactor
 for reactor in mp.get_reactors():
-    print(reactor.reaction_type_id, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.name)
 ```
 ---
 
@@ -311,7 +311,7 @@ for comment_reply in comment.get_replies():
 
 # Users who reacted to the comment → Reactor
 for reactor in comment.get_reactors():
-    print(reactor.reaction_type_id, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.name)
 ```
 ---
 

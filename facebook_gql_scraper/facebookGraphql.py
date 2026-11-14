@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta, date
 from typing import Optional, Literal
 
 import requests
+from urllib.parse import quote
 
 from . import __version__
 from .facebookConsolidater import consolidate_jsonl
@@ -98,10 +99,9 @@ class FacebookContext:
         self._state_file = state_file
 
         # --- doc-id caches ---
-        self.operations = {}  # { operation_name: doc_id }
-        self.page_operations = {}  # { reference_page_url: { operation_name: doc_id } }
+        self.operations = {}  # { operation_name: {doctId, args}
 
-        self.operation_discovery: FacebookOperationDiscovery= FacebookOperationDiscovery(self)
+        self.operation_discovery: FacebookOperationDiscovery= FacebookOperationDiscovery(self, diagnostics=self.debug)
 
 
         # --- dtsg token (lazy, refreshed on demand) ---
@@ -164,7 +164,6 @@ class FacebookContext:
                 {
                     "version": __version__,
                     "operations": self.operations,
-                    # "page_operations": self.page_operations,
                     "fb_dtsg": self.fb_dtsg,
                 },
                 f, indent=2, ensure_ascii=False,
@@ -174,10 +173,10 @@ class FacebookContext:
         """Return True if the session is dead, False otherwise."""
         all_headers = response.headers
         set_cookie = all_headers.get("set-cookie", "") or ""
-        set_login = all_headers.get("set-login", "") or ""
 
-        if ("c_user=deleted" in set_cookie) or ("logged-out" in set_login):
-            return True
+        if ("c_user=deleted" in set_cookie):
+           return True
+        
         return False
 
     def _classify_error(self, response) -> Optional[str]:
@@ -210,6 +209,24 @@ class FacebookContext:
                 return "empty_node"
                 
         return None
+
+    def _populate_pv_args(self, record: dict, variables: dict) -> dict:
+        """
+        Return {pvName: domain} for internal Relay pv args in the discovered
+        schema that are not already present in `variables`.
+
+        """
+        discovered = record.get("args") or {}
+        absent = {}
+
+        for name, domain in discovered.items():
+            if not name.startswith("__relay_internal__pv__"):
+                continue
+            if name in variables:
+                continue
+            absent[name] = domain
+
+        return absent
 
     # ------------------------------------------------------------------
     # dtsg handling
@@ -272,53 +289,30 @@ class FacebookContext:
         Falls back to running the operation discovery flow.
         """
         # 1. global cache
-        doc_id = self.operations.get(operation_name)
-        if doc_id:
-            return doc_id
+        cached = self.operations.get(operation_name)
+        if cached:
+            doc_id = cached.get("docId")
+            if doc_id:
+                return doc_id
 
-        # 2. page cache
-        page_ops = self.page_operations.get(reference_page_url) or {}
-        doc_id = page_ops.get(operation_name)
-        if doc_id:
-            self.operations[operation_name] = doc_id
-            self._save_state()
-            return doc_id
-
-        # 2b. page cache — scan every cached page for this operation
-        # for cached_url, cached_ops in self.page_operations.items():
-        #     doc_id = cached_ops.get(operation_name)
-        #     if doc_id:
-        #         logger.warning(
-        #             f"Operation {operation_name!r} found on cached page "
-        #             f"{cached_url!r} but not on {reference_page_url!r}; reusing."
-        #         )
-        #         self.operations[operation_name] = doc_id
-        #         self._save_state()
-        #         return doc_id
-
-        # 3. discovery
+        # 2. discovery
         self.progress("Discovering doc_id ...")
         logger.info("Discovering doc_id for %s ...", operation_name)
-        discovered = self.operation_discovery.discover_operation(reference_page_url, operation_name)
+        record = self.operation_discovery.discover_operation(reference_page_url, operation_name)
 
-        # fill both caches
-        self.page_operations[reference_page_url] = discovered
-
-        doc_id = discovered.get(operation_name)
+        doc_id = (record or {}).get("docId")
         if not doc_id:
             raise LookupError(
                 f"Could not discover {operation_name!r} on {reference_page_url!r}"
             )
-        self.operations[operation_name] = doc_id
+        self.operations[operation_name] = record
         self._save_state()
         return doc_id
 
-    def _invalidate_doc_id(self, operation_name: str, reference_page_url: str):
+    def _invalidate_doc_id(self, operation_name: str):
         """Drop a stale doc_id from both caches, and persist."""
         self.operations.pop(operation_name, None)
-        page_ops = self.page_operations.get(reference_page_url)
-        if page_ops:
-            page_ops.pop(operation_name, None)
+
         self._save_state()
 
     def reload_cookies(self):
@@ -343,6 +337,11 @@ class FacebookContext:
                 "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
             },
         )
+        if self.debug:
+            self.debug_response(
+                response=response,
+            )
+        
         if self._check_session_dead(response):
             raise SessionExpiredError("Facebook Cookies are expired.")
         return response
@@ -357,6 +356,12 @@ class FacebookContext:
 
         doc_id = self._resolve_doc_id(operation_name, reference_page_url)
         fb_dtsg = self._get_fb_dtsg()
+
+        record = self.operations.get(operation_name) or {}
+        pv_to_add = self._populate_pv_args(record, variables)
+
+        for name, domain in pv_to_add.items():
+            variables[name] = domain[0] if domain else None
 
         self.progress("Sending FacebookGql Request ...")
         logger.info("Sending FacebookGql Request (%s)", operation_name)
@@ -375,9 +380,9 @@ class FacebookContext:
 
         if self.debug:
             self.debug_response(
+                response,
                 operation_name,
                 doc_id,
-                response,
             )
         
         if self._check_session_dead(response):
@@ -387,6 +392,7 @@ class FacebookContext:
 
         # --- schema changed: not recoverable ---
         if reason == "schema":
+            
             logger.error(
                 "GraphQL schema changed for %s — variables no longer match",
                 operation_name,
@@ -405,7 +411,7 @@ class FacebookContext:
                 )
             self.progress("Facebook rotated the doc_id. Re-discovering ...")
             logger.info("doc_id invalid for %s", operation_name)
-            self._invalidate_doc_id(operation_name, reference_page_url)
+            self._invalidate_doc_id(operation_name)
 
             return self.post(
                 operation_name,
@@ -471,14 +477,43 @@ class FacebookContext:
     # Debug saving
     # ------------------------------------------------------------------
 
-    def debug_response(self, operation_name, doc_id, response):
+    def debug_response(self, response, operation_name = None, doc_id = None):
         """Save a GraphQL response together with request/response information."""
 
         os.makedirs(self.debug_dir, exist_ok=True)
+        get_debug_dir = os.path.join(self.debug_dir, "GET")
+        os.makedirs(get_debug_dir, exist_ok=True)
+        post_debug_dir = os.path.join(self.debug_dir, "POST")
+        os.makedirs(post_debug_dir, exist_ok=True)
 
-        filepath_raw = os.path.join(
-            self.debug_dir, f"{operation_name}_{doc_id}_raw.txt"
-        )
+        if operation_name is None and doc_id is None:
+            debug_data = {
+                "request": {
+                    "url": response.request.url,
+                    "method": response.request.method,
+                    "headers": dict(response.request.headers),
+                    "cookies": self.session.cookies.get_dict(),
+                    "body": response.request.body if response.request.body else None,
+                },
+                "response": {
+                    "status_code": response.status_code,
+                    "reason": response.reason,
+                    "url": response.url,
+                    "headers": dict(response.headers),
+                    "body": response.text
+                },
+            }
+
+            filepath_parsed = os.path.join(get_debug_dir, f"{quote(response.request.url, safe='')[:50]}.json")
+            
+            with open(filepath_parsed, "w", encoding="utf-8") as f:
+                json.dump(debug_data, f, indent=2, ensure_ascii=False, default=json_default)
+
+            return
+
+
+        filepath_raw = os.path.join(post_debug_dir, f"{operation_name}_{doc_id}_raw.txt")
+
         with open(filepath_raw, "w", encoding="utf-8") as f:
             f.write(response.text)
 
@@ -501,9 +536,8 @@ class FacebookContext:
 
         consolidated_json = consolidate_jsonl(response.text)
 
-        filepath_consolidated = os.path.join(
-            self.debug_dir, f"{operation_name}_{doc_id}_consolidated.json"
-        )
+        filepath_consolidated = os.path.join(post_debug_dir, f"{operation_name}_{doc_id}_consolidated.json")
+
         with open(filepath_consolidated, "w", encoding="utf-8") as f:
             json.dump(consolidated_json, f, indent=2, ensure_ascii=False)
 
@@ -512,9 +546,8 @@ class FacebookContext:
         if consolidated_json is not None:
             # ---- 4. Noise removal (only if consolidate succeeded) ----
             noise_removed_json = remove_raw_facebook_json_noise(consolidated_json)
-            filepath_cleaned = os.path.join(
-                self.debug_dir, f"{operation_name}_{doc_id}_cleaned.json"
-            )
+            filepath_cleaned = os.path.join(post_debug_dir, f"{operation_name}_{doc_id}_cleaned.json")
+
             with open(filepath_cleaned, "w", encoding="utf-8") as f:
                 json.dump(noise_removed_json, f, indent=2, ensure_ascii=False)
 
@@ -547,9 +580,8 @@ class FacebookContext:
             },
         }
 
-        filepath_parsed = os.path.join(
-            self.debug_dir, f"{operation_name}_{doc_id}_parsed.json"
-        )
+        filepath_parsed = os.path.join(post_debug_dir, f"{operation_name}_{doc_id}_parsed.json")
+
         with open(filepath_parsed, "w", encoding="utf-8") as f:
             json.dump(debug_data, f, indent=2, ensure_ascii=False, default=json_default)
 
@@ -575,8 +607,9 @@ class FacebookGraphQL:
 class ProfileCometAboutAppSectionQueryGraphQL(FacebookGraphQL):
     """Profile About tab — sections and collections for a user's About page."""
 
-    OPERATION_NAME = "ProfileCometAboutAppSectionQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://web.facebook.com/Cristiano/about"
+    OPERATION_NAME = "ProfileCometAboutAppSectionQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometAboutTabRoot.react"
+
     VARIABLES = {
         "appSectionFeedKey": None,
         "collectionToken": None,
@@ -586,28 +619,6 @@ class ProfileCometAboutAppSectionQueryGraphQL(FacebookGraphQL):
         "sectionToken": None,
         "showReactions": True,
         "userID": None,
-        "__relay_internal__pv__FBProfile_enable_perf_improv_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometReels_enable_e2e_logging_gkrelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaContentContainer_comet_video_document_picture_in_picture_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaContentContainer_enable_chapters_pill_gkrelayprovider": True,
-        "__relay_internal__pv__ShouldEnableBakedInTextUnifiedVideorelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoCometVideoMedia_comet_photosensitive_content_warning_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaHeaderControls_enable_chapters_pill_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_organic_ad_cta_on_comet_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_meta_ai_pill_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_ai_embodiment_chat_pill_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_video_augment_pills_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoPlayerScrubber_fb_comet_vpv_heatmap_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoDescriptionWithEntities_comet_translations_revamp_sync_caption_with_audio_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoFeedbackBar_comet_reels_save_button_gkrelayprovider": False,
-        "__relay_internal__pv__usePushPipEngagementCounts_comet_video_document_picture_in_picture_gkrelayprovider": False,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMenu_fb_reels_ranking_debug_tool_gkrelayprovider": False,
-        "__relay_internal__pv__CometAudioLanguageUtils_comet_translations_revamp_preferred_languages_gkrelayprovider": False,
     }
 
     def send(self, userId: str, sectionToken: str, collectionToken: str):
@@ -625,8 +636,9 @@ class ProfileCometHeaderQueryGraphQL(FacebookGraphQL):
     navigate the user's profile tabs (About, Followers, Photos, Reels, etc.).
     """
 
-    OPERATION_NAME = "ProfileCometHeaderQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano"
+    OPERATION_NAME = "ProfileCometHeaderQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometHeader.react"
+
     VARIABLES = {
         "scale": 1,
         "selectedID": None,
@@ -646,16 +658,16 @@ class ProfileCometAppCollectionListRendererPaginationQueryGraphQL(FacebookGraphQ
     """Timeline app collection — followers, followees, friends, or photos, paginated."""
 
     OPERATION_NAME = (
-        "ProfileCometAppCollectionListRendererPaginationQuery_facebookRelayOperation"
+        "ProfileCometAppCollectionListRendererPaginationQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/followers"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometAppCollectionListRenderer.react"
+
     VARIABLES = {
         "count": 8,
         "cursor": None,
         "scale": 1,
         "search": None,
         "id": None,
-        "__relay_internal__pv__FBProfile_enable_perf_improv_gkrelayprovider": True,
     }
 
     def send(self, collectionId: str, cursor: str = None):
@@ -669,9 +681,10 @@ class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraph
     """Timeline app collection — reels with fuller video metadata, paginated."""
 
     OPERATION_NAME = (
-        "ProfileCometAppCollectionReelsRendererPaginationQuery_facebookRelayOperation"
+        "ProfileCometAppCollectionReelsRendererPaginationQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/reels/"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometAppCollectionReelsRenderer.react"
+
     VARIABLES = {
         "count": 10,
         "cursor": None,
@@ -679,26 +692,6 @@ class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraph
         "scale": 1,
         "useDefaultActor": False,
         "id": None,
-        "__relay_internal__pv__CometReels_enable_e2e_logging_gkrelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaContentContainer_comet_video_document_picture_in_picture_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaContentContainer_enable_chapters_pill_gkrelayprovider": True,
-        "__relay_internal__pv__ShouldEnableBakedInTextUnifiedVideorelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoCometVideoMedia_comet_photosensitive_content_warning_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaHeaderControls_enable_chapters_pill_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_organic_ad_cta_on_comet_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_meta_ai_pill_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_ai_embodiment_chat_pill_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoMediaFooter_enable_video_augment_pills_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoPlayerScrubber_fb_comet_vpv_heatmap_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoDescriptionWithEntities_comet_translations_revamp_sync_caption_with_audio_gkrelayprovider": False,
-        "__relay_internal__pv__FBUnifiedVideoFeedbackBar_comet_reels_save_button_gkrelayprovider": False,
-        "__relay_internal__pv__usePushPipEngagementCounts_comet_video_document_picture_in_picture_gkrelayprovider": False,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__FBUnifiedVideoMenu_fb_reels_ranking_debug_tool_gkrelayprovider": False,
-        "__relay_internal__pv__CometAudioLanguageUtils_comet_translations_revamp_preferred_languages_gkrelayprovider": False,
     }
 
     def send(self, collectionId: str, cursor: str = None):
@@ -711,8 +704,9 @@ class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraph
 class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
     """Profile timeline — the user's own posts, paginated."""
 
-    OPERATION_NAME = "ProfileCometTimelineFeedRefetchQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano"
+    OPERATION_NAME = "ProfileCometTimelineFeedRefetchQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometTimeline.react"
+
     VARIABLES = {
         "afterTime": None,
         "beforeTime": None,
@@ -735,34 +729,6 @@ class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
         "taggedInOnly": None,
         "trackingCode": None,
         "useDefaultActor": False,
-        "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": True,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider": True,
-        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
-        "__relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider": False,
-        "__relay_internal__pv__IsMergQAPollsrelayprovider": False,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
-        "__relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider": True,
-        "__relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider": 206,
-        "__relay_internal__pv__StoriesShouldEnablePhotosensitiveContentWarningrelayprovider": False,
-        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": False,
-        "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
     }
 
     def send(
@@ -791,8 +757,8 @@ class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
 class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
     """Single post detail — full post content, comments, reactions."""
 
-    OPERATION_NAME = "CometSinglePostDialogContentQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
+    OPERATION_NAME = "CometSinglePostDialogContentQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometSinglePostDialogContent.react"
     VARIABLES = {
         "feedbackSource": 2,
         "feedLocation": "POST_PERMALINK_DIALOG",
@@ -804,36 +770,6 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
         "shouldChangeNodeFieldName": True,
         "storyID": None,
         "useDefaultActor": False,
-        "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": True,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider": True,
-        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
-        "__relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider": False,
-        "__relay_internal__pv__IsMergQAPollsrelayprovider": False,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
-        "__relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider": True,
-        "__relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider": 206,
-        "__relay_internal__pv__StoriesShouldEnablePhotosensitiveContentWarningrelayprovider": False,
-        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": True,
-        "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
-        "__relay_internal__pv__ProfileCometSeoIsViewerLoggedOutrelayprovider": False,
-        "__relay_internal__pv__CometSinglePostDialogContent_isFloatingCTAEnabledrelayprovider": False,
     }
 
     def send(self, postId: str, postType: Literal["user_post", "group_post"]= "user_post", userId: str = "1"):
@@ -853,8 +789,9 @@ class CometSinglePostDialogContentQueryGraphQL(FacebookGraphQL):
 class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
     """Post comments — top-level comments, paginated."""
 
-    OPERATION_NAME = "CommentsListComponentsPaginationQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
+    OPERATION_NAME = "CommentsListComponentsPaginationQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometUFICommentListRendererForCommentsAPIMediaViewer.react"
+
     VARIABLES = {
         "commentsAfterCount": None,
         "commentsAfterCursor": None,
@@ -867,10 +804,6 @@ class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
         "scale": 1,
         "targetDialect": None,
         "useDefaultActor": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
     def send(self, feedbackId: str, commentsAfterCursor: str = None):
@@ -886,8 +819,8 @@ class CommentsListComponentsPaginationQueryGraphQL(FacebookGraphQL):
 class Depth1CommentsListPaginationQueryGraphQL(FacebookGraphQL):
     """Comment replies — first-level replies to a comment, paginated."""
 
-    OPERATION_NAME = "Depth1CommentsListPaginationQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
+    OPERATION_NAME = "Depth1CommentsListPaginationQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometUFICommentListRendererForCommentsAPIMediaViewer.react"
     VARIABLES = {
         "clientKey": None,
         "expansionToken": None,
@@ -900,10 +833,6 @@ class Depth1CommentsListPaginationQueryGraphQL(FacebookGraphQL):
         "repliesBeforeCursor": None,
         "scale": 1,
         "useDefaultActor": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
     }
 
     def send(
@@ -921,53 +850,14 @@ class Depth1CommentsListPaginationQueryGraphQL(FacebookGraphQL):
         return super().send(variables)
 
 
-# class Depth2CommentsListPaginationQueryGraphQL(FacebookGraphQL):
-#     """Comment sub-replies — second-level replies, paginated."""
-
-#     OPERATION_NAME = "Depth2CommentsListPaginationQuery_facebookRelayOperation"
-#     REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/posts/pfbid02wwWW6zEYdHpCmYbVWEwJMX8QH5ve4izADrhZpPeHxFScJkwEbdLsq9VpoboHpJFLl"
-#     VARIABLES = {
-#         "clientKey": None,
-#         "expansionToken": None,
-#         "feedLocation": "POST_PERMALINK_DIALOG",
-#         "id": None,
-#         "scale": 1,
-#         "subRepliesAfterCount": None,
-#         "subRepliesAfterCursor": None,
-#         "subRepliesBeforeCount": None,
-#         "subRepliesBeforeCursor": None,
-#         "useDefaultActor": False,
-#         "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-#         "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-#         "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-#         "__relay_internal__pv__IsWorkUserrelayprovider": False,
-#     }
-
-#     def send(
-#         self,
-#         postId: str,
-#         commentId: str,
-#         expansionToken: str,
-#         subRepliesAfterCursor: str = None,
-#     ):
-#         variables = dict(self.VARIABLES)
-#         variables["id"] = base64.b64encode(
-#             f"feedback:{postId}_{commentId}".encode()
-#         ).decode()
-#         variables["expansionToken"] = expansionToken
-#         if subRepliesAfterCursor is not None:
-#             variables["subRepliesAfterCount"] = -1
-#             variables["subRepliesAfterCursor"] = subRepliesAfterCursor
-#         return super().send(variables)
-
-
 class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
     """Post and comment reactors — list of users who reacted, paginated."""
 
     OPERATION_NAME = (
-        "CometUFIReactionsDialogTabContentRefetchQuery_facebookRelayOperation"
+        "CometUFIReactionsDialogTabContentRefetchQuery"
     )
-    REFERENCE_PAGE_URL = "https://web.facebook.com/ufi/reaction/profile/browser/?ft_ent_identifier=1477237711067526"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometUFIReactionsDialog.react"
+
     VARIABLES = {
         "count": 10,
         "cursor": None,
@@ -996,15 +886,15 @@ class CometUFIReactionsDialogTabContentRefetchQueryGraphQL(FacebookGraphQL):
 class CometHovercardQueryRendererQueryGraphQL(FacebookGraphQL):
     """Profile or group hovercard — lightweight summary card."""
 
-    OPERATION_NAME = "CometHovercardQueryRendererQuery$Parameters"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/Cristiano/about"
+    OPERATION_NAME = "CometHovercardQueryRendererQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometHovercardQueryRenderer.react"
+
     VARIABLES = {
         "actionBarRenderLocation": "WWW_COMET_HOVERCARD",
         "context": "GROUP",
         "entityID": None,
         "groupID": None,
         "scale": 1,
-        "__relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider": False,
     }
 
     def send(self, groupId: str):
@@ -1017,8 +907,9 @@ class CometHovercardQueryRendererQueryGraphQL(FacebookGraphQL):
 class CometGroupAboutRootQueryGraphQL(FacebookGraphQL):
     """Group About page — description, privacy, member count, created time."""
 
-    OPERATION_NAME = "CometGroupAboutRootQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/groups/workingmemes/about"
+    OPERATION_NAME = "CometGroupAboutRootQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometGroupAboutRoot.react"
+
     VARIABLES = {"groupID": None, "scale": 1}
 
     def send(self, groupId: str):
@@ -1031,9 +922,10 @@ class GroupsCometFeedRegularStoriesPaginationQueryGraphQL(FacebookGraphQL):
     """Group timeline — posts within a group, paginated."""
 
     OPERATION_NAME = (
-        "GroupsCometFeedRegularStoriesPaginationQuery_facebookRelayOperation"
+        "GroupsCometFeedRegularStoriesPaginationQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/groups/workingmemes"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometGroupDiscussionRoot.Success.react"
+
     VARIABLES = {
         "count": 3,
         "cursor": None,
@@ -1051,34 +943,6 @@ class GroupsCometFeedRegularStoriesPaginationQueryGraphQL(FacebookGraphQL):
         "stream_initial_count": 1,
         "useDefaultActor": False,
         "youthIntegrityHostID": None,
-        "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": True,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider": True,
-        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
-        "__relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider": False,
-        "__relay_internal__pv__IsMergQAPollsrelayprovider": False,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
-        "__relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider": True,
-        "__relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider": 206,
-        "__relay_internal__pv__StoriesShouldEnablePhotosensitiveContentWarningrelayprovider": False,
-        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": False,
-        "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
     }
 
     def send(self, groupId: str, cursor: str, sortingSetting: str = "CHRONOLOGICAL"):
@@ -1094,9 +958,10 @@ class GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(FacebookGraphQL
     """Group members — list of members, paginated."""
 
     OPERATION_NAME = (
-        "GroupsCometMembersPageNewMembersSectionRefetchQuery_facebookRelayOperation"
+        "GroupsCometMembersPageNewMembersSectionRefetchQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/groups/workingmemes/members"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometMembersSummaryTwoColumnWrapper.react"
+
     VARIABLES = {
         "count": 10,
         "cursor": None,
@@ -1117,8 +982,9 @@ class GroupsCometMembersPageNewMembersSectionRefetchQueryGraphQL(FacebookGraphQL
 class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
     """Facebook SERP — profiles, posts, and groups matching a search query, paginated."""
 
-    OPERATION_NAME = "SearchCometResultsPaginatedResultsQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/search/people/?q=Ishowspeed"
+    OPERATION_NAME = "SearchCometResultsPaginatedResultsQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=SearchCometResultsInitialResults.react"
+
     VARIABLES = {
         "allow_streaming": False,
         "args": {
@@ -1153,34 +1019,6 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
         "scale": 1,
         "stream_initial_count": 0,
         "useDefaultActor": False,
-        "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__CometFeedStory_enable_reactor_facepilerelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_social_bubblesrelayprovider": False,
-        "__relay_internal__pv__CometFeedStory_enable_post_permalink_white_space_clickrelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
-        "__relay_internal__pv__FBReels_deprecate_short_form_video_context_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": True,
-        "__relay_internal__pv__FBReels_enable_view_dubbed_audio_type_gkrelayprovider": True,
-        "__relay_internal__pv__CometFeedShareMedia_shouldPrefetchShareImagerelayprovider": True,
-        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
-        "__relay_internal__pv__WorkCometIsEmployeeGKProviderrelayprovider": False,
-        "__relay_internal__pv__IsMergQAPollsrelayprovider": False,
-        "__relay_internal__pv__FBReelsMediaFooter_comet_enable_reels_ads_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__relay_provider_comet_ufi_ssr_seo_deferrelayprovider": True,
-        "__relay_internal__pv__FBReelsIFUTileContent_reelsIFUPlayOnHoverrelayprovider": True,
-        "__relay_internal__pv__GroupsCometGYSJFeedItemHeightrelayprovider": 206,
-        "__relay_internal__pv__StoriesShouldEnablePhotosensitiveContentWarningrelayprovider": False,
-        "__relay_internal__pv__ShouldEnableBakedInTextStoriesrelayprovider": False,
-        "__relay_internal__pv__StoriesShouldIncludeFbNotesrelayprovider": True,
     }
 
     def send(
@@ -1214,11 +1052,9 @@ class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
     """Marketplace search — listings matching a query, paginated."""
 
     OPERATION_NAME = (
-        "CometMarketplaceSearchContentPaginationQuery_facebookRelayOperation"
+        "CometMarketplaceSearchContentPaginationQuery"
     )
-    REFERENCE_PAGE_URL = (
-        "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
-    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometMarketplaceSearchContent.react"
     VARIABLES = {
         "count": 24,
         "cursor": None,
@@ -1251,7 +1087,6 @@ class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
             },
         },
         "scale": 1,
-        "__relay_internal__pv__GHLShouldChangeMarketplaceSponsoredDataFieldNamerelayprovider": True,
     }
 
     def send(
@@ -1309,8 +1144,9 @@ class CometMarketplaceSearchContentPaginationQueryGraphQL(FacebookGraphQL):
 class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
     """Marketplace product details page — listing fields and seller context."""
 
-    OPERATION_NAME = "MarketplacePDPContainerQuery_facebookRelayOperation"
-    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometMarketplacePermalinkRoot.react"
+    OPERATION_NAME = "MarketplacePDPContainerQuery"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=MarketplacePDPContainer.react"
+
     VARIABLES = {
         "enableJobEmployerActionBar": False,
         "enableJobSeekerActionBar": False,
@@ -1322,31 +1158,6 @@ class MarketplacePDPContainerQueryGraphQL(FacebookGraphQL):
         "shouldFetchLoggedOutSimilarListings": False,
         "targetId": None,
         "useDefaultActor": False,
-        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPCometSimilarListingsrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldShowRelatedSearchesrelayprovider": True,
-        "__relay_internal__pv__MarketplacePDPShouldShowLoggedOutSellerTrustrelayprovider": False,
-        "__relay_internal__pv__ShouldUpdateMarketplaceBoostListingBoostedStatusrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldFetchSellerInforelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPIsLoggedOutrelayprovider": False,
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__GHLShouldChangeAdIdFieldNamerelayprovider": True,
-        "__relay_internal__pv__CometUFI_dedicated_comment_routable_dialog_gkrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__MarketplacePDPShouldShowBSGRecommendationsrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPJobShouldShowSharedGroupsSectionrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPJobIsShareToGroupsEnabledOnCometrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldShowFAQrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldShowRelatedCategoriesrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldShowSupportFooterrelayprovider": False,
-        "__relay_internal__pv__MarketplacePDPShouldUseListingRevamprelayprovider": False,
     }
 
     def send(self, marketListingId: str):
@@ -1359,11 +1170,10 @@ class MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL(FacebookGraphQL):
     """Marketplace PDP media — photos and videos for a listing."""
 
     OPERATION_NAME = (
-        "MarketplacePDPC2CMediaViewerWithImagesQuery_facebookRelayOperation"
+        "MarketplacePDPC2CMediaViewerWithImagesQuery"
     )
-    REFERENCE_PAGE_URL = (
-        "https://www.facebook.com/marketplace/160300197351040/search/?query=67"
-    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=MarketplacePDPPartnerListingComponent.react"
+
     VARIABLES = {"targetId": None}
 
     def send(self, marketListingId: str):
@@ -1376,9 +1186,9 @@ class CometPhotoRootContentQueryGraphQL(FacebookGraphQL):
     """Media Post Details"""
 
     OPERATION_NAME = (
-        "CometPhotoRootContentQuery_facebookRelayOperation"
+        "CometPhotoRootContentQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometPhotoRoot.react"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=CometPhotoRootContent.react"
 
     VARIABLES = {
         "feedbackSource": 65,
@@ -1392,17 +1202,6 @@ class CometPhotoRootContentQueryGraphQL(FacebookGraphQL):
         "scale": 1,
         "focusCommentID": None,
         "glbFileURIHackToRenderAs3D_DO_NOT_USE": None,
-        "__relay_internal__pv__GHLShouldChangeSponsoredDataFieldNamerelayprovider": True,
-        "__relay_internal__pv__TestPilotShouldIncludeDemoAdUseCaserelayprovider": False,
-        "__relay_internal__pv__CometUFIShareActionMigrationrelayprovider": True,
-        "__relay_internal__pv__CometUFICommentAutoTranslationTyperelayprovider": "ORIGINAL",
-        "__relay_internal__pv__IsWorkUserrelayprovider": False,
-        "__relay_internal__pv__CometUFICommentAvatarStickerAnimatedImagerelayprovider": False,
-        "__relay_internal__pv__CometUFICommentActionLinksRewriteEnabledrelayprovider": True,
-        "__relay_internal__pv__CometUFIReactionsEnableShortNamerelayprovider": False,
-        "__relay_internal__pv__CometUFISingleLineUFIrelayprovider": True,
-        "__relay_internal__pv__CometImmersivePhotoCanUserDisable3DMotionrelayprovider": False,
-        "__relay_internal__pv__GeminiUFISaveToKnowledgeHubGKrelayprovider": False
     }
 
     def send(self, mediaPostId: str, postId: str = None):
@@ -1417,9 +1216,9 @@ class GroupsCometMediaPhotosTabGridQueryGraphQL(FacebookGraphQL):
     """Media Post Details"""
 
     OPERATION_NAME = (
-        "GroupsCometMediaPhotosTabGridQuery_facebookRelayOperation"
+        "GroupsCometMediaPhotosTabGridQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometPhotosRoot.react"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometPhotosRootQueryContainer.react"
 
     VARIABLES = {
         "count": 65,
@@ -1439,9 +1238,9 @@ class GroupsCometMediaVideosTabGridQueryGraphQL(FacebookGraphQL):
     """Media Post Details"""
 
     OPERATION_NAME = (
-        "GroupsCometMediaVideosTabGridQuery_facebookRelayOperation"
+        "GroupsCometMediaVideosTabGridQuery"
     )
-    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometVideosRoot.react"
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=GroupsCometVideosRootQueryContainer.react"
 
     VARIABLES = {
         "count": 65,

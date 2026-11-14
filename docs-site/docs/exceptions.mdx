@@ -99,9 +99,6 @@ Base class for all errors raised by this library.
   <Prop name="InvalidUsageError" type="Exception">
     Base for errors caused by incorrect API usage. Also inherits `ValueError`. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
   </Prop>
-  <Prop name="MissingParentError" type="Exception">
-    A model needs its parent, but none was provided. <br /> Inherits [`InvalidUsageError`](#usage-errors).
-  </Prop>
   <Prop name="InvalidIdTypeError" type="Exception">
     The id belongs to a different entity type — e.g. a media post id passed to `Post.from_post_id()`. <br /> Inherits [`InvalidUsageError`](#usage-errors).
   </Prop>

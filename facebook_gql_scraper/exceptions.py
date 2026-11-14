@@ -87,9 +87,5 @@ class InvalidUsageError(FacebookGqlScraperException, ValueError):
     """The SDK was called incorrectly (bad value, missing required parent, …)."""
 
 
-class MissingParentError(InvalidUsageError):
-    """A model needs its parent, but none was provided."""
-
-
 class InvalidIdTypeError(InvalidUsageError):
     """The provided id belongs to a different entity type than the one requested."""

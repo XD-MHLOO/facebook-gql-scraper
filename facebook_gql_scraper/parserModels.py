@@ -198,6 +198,7 @@ ParserFeedPost = Annotated[
 class ParserReactor(_Base):
     type: Literal["reactor"] = "reactor"
     reaction_type_id: Optional[str] = None
+    reaction_type: Optional[str]= None
     author: Optional[ParserProfileRef] = None
 
 

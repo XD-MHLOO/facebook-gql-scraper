@@ -34,7 +34,6 @@ from .exceptions import (
     FriendFolloweesNotAvailableException,
     PhotoNotAvailableException,
     ReelsNotAvailableException,
-    MissingParentError,
     ProfileNotFoundError,
     PostNotFoundError,
     MediaPostNotFoundError,
@@ -154,11 +153,14 @@ class Reactor(NamedTuple):
 
     :ivar reaction_type_id: Identifier of the reaction type.
     :vartype reaction_type_id: str or None
+    :ivar reaction_type: Reaction type label.
+    :vartype reaction_type: str or None
     :ivar profile: Profile of the user who reacted.
     :vartype profile: Profile or None
     """
 
     reaction_type_id: Optional[str] = None
+    reaction_type: Optional[str] = None
     profile: Optional["Profile"] = None
 
 
@@ -763,6 +765,7 @@ class PostBase(FacebookModel):
         def item_wrapper(raw):
             return Reactor(
                 reaction_type_id=raw["reaction_type_id"],
+                reaction_type=raw["reaction_type"],
                 profile=Profile(self._context, raw["author"]),
             )
 
@@ -2296,14 +2299,8 @@ class Comment(FacebookModel):
 
         :return: Iterator yielding reply :class:`Comment` objects.
         :rtype: PaginatedIterator[Comment]
-        :raises MissingParentError: If the comment has no parent post.
         """
         comment_replies_graphql = Depth1CommentsListPaginationQueryGraphQL(self._context)
-
-        if self.post is None:
-            raise MissingParentError(
-                "Comment has no parent Post. Replies require the parent Post's ID to be fetched."
-            )
 
         if self.reply_count == 0:
             return PaginatedIterator.empty(
@@ -2357,16 +2354,10 @@ class Comment(FacebookModel):
 
         :return: Iterator yielding :class:`Reactor` objects.
         :rtype: PaginatedIterator
-        :raises MissingParentError: If the comment has no parent post.
         """
         reactors_graphql = CometUFIReactionsDialogTabContentRefetchQueryGraphQL(
             self._context
         )
-
-        if self.post is None:
-            raise MissingParentError(
-                "Comment has no parent Post. Accessing reactors require the parent Post's ID to be fetched."
-            )
 
         def request_fn(cursor):
             return reactors_graphql.send(
@@ -2377,18 +2368,7 @@ class Comment(FacebookModel):
 
         def page_wrapper(parsed):
             page: ParserReactorsPage = parsed.parsed_data
-            raw_items = [
-                {
-                    "reaction_type_id": r.reaction_type_id,
-                    "author": {
-                        "id": r.author.id if r.author else None,
-                        "name": r.author.name if r.author else None,
-                        "url": r.author.url if r.author else None,
-                        "profile_picture_url": r.author.profile_picture_url if r.author else None,
-                    },
-                }
-                for r in page.reactors
-            ]
+            raw_items = [r.model_dump(exclude_none=True) for r in page.reactors]
             page_info = {
                 "has_next_page": page.page_info.has_next_page,
                 "end_cursor": page.page_info.end_cursor,
@@ -2398,6 +2378,7 @@ class Comment(FacebookModel):
         def item_wrapper(raw):
             return Reactor(
                 reaction_type_id=raw["reaction_type_id"],
+                reaction_type=raw["reaction_type"],
                 profile=Profile(self._context, raw["author"]),
             )
 
