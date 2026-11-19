@@ -41,7 +41,7 @@ MAX_MARKETPLACE_RESULTS = 10
 class TestFacebook(unittest.TestCase):
 
     def setUp(self):
-        self.fbContext = fgs.FacebookContext(debug=True)
+        self.fbContext = fgs.FacebookContext(cookies_file="facebook_cookies.json", debug=True)
 
     # ========================================================
     # Profile

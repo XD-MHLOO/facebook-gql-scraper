@@ -129,7 +129,6 @@ class ParserVideoMedia(ParserMediaBase):
     thumbnail_image_url: Optional[str] = None
     fallback_image_url: Optional[str] = None
     video_url: Optional[str] = None
-    play_count: Optional[str] = None
 
 
 class ParserGenericMedia(ParserMediaBase):

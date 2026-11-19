@@ -16,9 +16,12 @@ from .exceptions import (
     DocIdStillInvalidError,
     DtsgTokenStillInvalidError,
     DtsgTokenFetchError,
+    LsdTokenFetchError,
     SessionExpiredError,
     SchemaChangedError,
-    EmptyNodeError
+    EmptyNodeError,
+    RateLimitExceededError,
+    LoginRequiredError
 )
 from .facebookNoiseRemoval import remove_raw_facebook_json_noise
 from .facebookOperationDiscovery import FacebookOperationDiscovery
@@ -43,7 +46,7 @@ class FacebookContext:
 
     def __init__(
         self,
-        cookies_file: str = "facebook_cookies.json",
+        cookies_file: Optional[str] = None,
         state_file: str = "facebook_state.json",
         user_agent: Optional[str] = None,
         proxy: Optional[str] = None,
@@ -60,6 +63,11 @@ class FacebookContext:
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/151.0.0.0 Safari/537.36"
             )
+        if cookies_file:
+            self.login = True
+        else:
+            self.login = False
+
 
         self.session = requests.Session()
         self.session.headers.update(
@@ -101,13 +109,14 @@ class FacebookContext:
         # --- doc-id caches ---
         self.operations = {}  # { operation_name: {doctId, args}
 
-        self.operation_discovery: FacebookOperationDiscovery= FacebookOperationDiscovery(self, diagnostics=self.debug)
+        self.operation_discovery: FacebookOperationDiscovery= FacebookOperationDiscovery(self)
 
 
-        # --- dtsg token (lazy, refreshed on demand) ---
-        self.fb_dtsg = None
+        # --- csrf token (lazy, refreshed on demand) ---
+        self.csrf_token = None
 
-        self._load_cookies()
+        if self.login:
+            self._load_cookies()
         self._load_state()
 
     def progress(self, message):
@@ -154,22 +163,28 @@ class FacebookContext:
             return
 
         self.operations = state.get("operations") or {}
-        self.fb_dtsg = state.get("fb_dtsg")
+        if self.login:
+            self.csrf_token = state.get("fb_dtsg")
 
     def _save_state(self):
         """Persist operation doc-ids and the dtsg token to disk."""
 
         with open(self._state_file, "w", encoding="utf-8") as f:
+            state = {
+                "version": __version__,
+                "operations": self.operations,
+                "fb_dtsg": None,
+            }
+
+            if self.login:
+                state["fb_dtsg"] = self.csrf_token
+
             json.dump(
-                {
-                    "version": __version__,
-                    "operations": self.operations,
-                    "fb_dtsg": self.fb_dtsg,
-                },
+                state,
                 f, indent=2, ensure_ascii=False,
             )
 
-    def _check_session_dead(self, response) -> None:
+    def _check_session_dead(self, response) -> bool:
         """Return True if the session is dead, False otherwise."""
         all_headers = response.headers
         set_cookie = all_headers.get("set-cookie", "") or ""
@@ -198,7 +213,12 @@ class FacebookContext:
         for msg in messages:
             if "GraphQL document with ID" in msg and "was not found" in msg:
                 return "doc_id"
-
+        for msg in messages:
+            if "Rate limit exceeded" in msg:
+                return "rate_limit"
+        for msg in messages:
+            if "Unauthorized logged out query" in msg:
+                return "login_required"
         # soft failure: HTTP 200, no errors, but the node is null
         if not messages:
             if (
@@ -232,24 +252,41 @@ class FacebookContext:
     # dtsg handling
     # ------------------------------------------------------------------
 
-    def _get_fb_dtsg(self) -> str:
+    def _get_csrf_token(self) -> str:
         """Return a cached dtsg token, fetching one from www.facebook.com if needed."""
-        if self.fb_dtsg:
-            return self.fb_dtsg
+        if self.csrf_token:
+            return self.csrf_token
 
-        self.progress("Fetching fb_dtsg ...")
-        html = self.get("https://www.facebook.com").text
+        self.progress("Fetching csrf_token ...")
 
-        m = re.search(r'\{"name":"fb_dtsg","value":"([^"]+)"\}', html)
-        if not m:
-            raise DtsgTokenFetchError("Could not find fb_dtsg")
 
-        self.fb_dtsg = m.group(1)
+        if self.login:
+            html = self.get("https://www.facebook.com").text
+            
+            m = re.search(r'"DTSGInitialData",\[\],\{"token":"([^"]+)"', html)
+
+            if not m:
+                raise DtsgTokenFetchError("Could not find fb_dtsg")
+        else:
+            html = self.get("https://www.facebook.com", {
+                "sec-fetch-dest": "document",
+                "sec-fetch-mode": "navigate",
+            }).text
+
+            m = re.search(r'"LSD",\[\],\{"token":"([^"]+)"', html)
+            
+            if not m:
+                raise LsdTokenFetchError("Could not find lsd")
+            
+        self.csrf_token = m.group(1)
         self._save_state()
-        return self.fb_dtsg
+        return self.csrf_token
 
-    def _is_dtsg_invalid(self, response) -> bool:
-        """Return True if the response says 'Sorry, something went wrong'."""
+    def _is_csrf_token_invalid(self, response) -> bool:
+        """
+        Return True if the response says 'Sorry, something went wrong'. (LOGIN)
+        Return True if the response says 'Your request couldn't be processed'. (NON LOGIN)
+        """
         text = response.text
         if not text.startswith("for (;;);"):
             return False
@@ -257,7 +294,7 @@ class FacebookContext:
             data = json.loads(text.removeprefix("for (;;);"))
         except (json.JSONDecodeError, TypeError):
             return False
-        return data.get("errorSummary") == "Sorry, something went wrong"
+        return data.get("errorSummary") in ["Sorry, something went wrong", "Your request couldn't be processed"]
 
     def _extract_dtsg_from_response(self, response):
         """Return the dtsgToken from an error response, or None."""
@@ -274,7 +311,7 @@ class FacebookContext:
         """Try to update the dtsg token from an error response. Returns True on success."""
         token = self._extract_dtsg_from_response(response)
         if token:
-            self.fb_dtsg = token
+            self.csrf_token = token
             self._save_state()
             return True
         return False
@@ -320,7 +357,7 @@ class FacebookContext:
         self.session.cookies.clear()
         self._load_cookies()
 
-    def get(self, url):
+    def get(self, url, headers={}):
         """
         GET a Facebook HTML page as a browser navigation.
 
@@ -331,12 +368,13 @@ class FacebookContext:
         :return: The HTTP response.
         :rtype: requests.Response
         """
+        headers["accept"]="text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"
+        
         response = self.session.get(
             url,
-            headers={
-                "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
-            },
+            headers=headers
         )
+
         if self.debug:
             self.debug_response(
                 response=response,
@@ -344,9 +382,20 @@ class FacebookContext:
         
         if self._check_session_dead(response):
             raise SessionExpiredError("Facebook Cookies are expired.")
+
         return response
 
-    def post(self, operation_name, reference_page_url, variables, _retried_count=0):
+
+    def post(self, url, *, data=None, headers=None):
+        """Generic HTTP POST."""
+        data["__comet_req"] = 15
+        data["__a"] = 1
+        
+        response = self.session.post(url, data=data, headers=headers)
+
+        return response
+
+    def post_graphql(self, operation_name, reference_page_url, variables, _retried_count=0):
         """
         Send a GraphQL request for the given operation.
 
@@ -355,7 +404,6 @@ class FacebookContext:
         """
 
         doc_id = self._resolve_doc_id(operation_name, reference_page_url)
-        fb_dtsg = self._get_fb_dtsg()
 
         record = self.operations.get(operation_name) or {}
         pv_to_add = self._populate_pv_args(record, variables)
@@ -363,20 +411,23 @@ class FacebookContext:
         for name, domain in pv_to_add.items():
             variables[name] = domain[0] if domain else None
 
-        self.progress("Sending FacebookGql Request ...")
-        logger.info("Sending FacebookGql Request (%s)", operation_name)
-
         payload = {
             "doc_id": doc_id,
             "variables": json.dumps(variables),
-            "fb_dtsg": fb_dtsg,
-            "__comet_req": 15,
-            "__a": 1,
         }
 
-        response = self.session.post(
+        csrf_token = self._get_csrf_token()
+        if self.login:
+            payload["fb_dtsg"] = csrf_token
+
+        self.progress(f"Sending FacebookGql Request ...")
+        logger.info("Sending FacebookGql Request (%s)", operation_name)
+
+
+        response = self.post(
             "https://web.facebook.com/api/graphql/", data=payload
         )
+
 
         if self.debug:
             self.debug_response(
@@ -385,7 +436,7 @@ class FacebookContext:
                 doc_id,
             )
         
-        if self._check_session_dead(response):
+        if self.login and self._check_session_dead(response):
             raise SessionExpiredError("Facebook Cookies are expired.")
 
         reason = self._classify_error(response)
@@ -420,20 +471,31 @@ class FacebookContext:
                 _retried_count=_retried_count + 1,
             )
 
+        if reason == "rate_limit":
+            raise RateLimitExceededError(
+                "'Facebook rate limit exceeded."
+            )
+        if reason == "login_required":
+            raise LoginRequiredError(
+                "Login required: Facebook restricts access to this data to authenticated users."
+            )
         # --- dtsg rejection ---
-        if self._is_dtsg_invalid(response):
+        if self._is_csrf_token_invalid(response):
             if _retried_count >= 1:
-                raise DtsgTokenStillInvalidError(
-                    "still invalid after using a new fb_dstg token."
-                )
-            self.fb_dtsg = None
-            self.progress("Refreshing fb_dtsg token ...")
-            logger.info("Facebook rejected fb_dtsg, refreshing from error response")
-
-            refreshed = self._refresh_dtsg_from_response(response)
-            if not refreshed and self._get_fb_dtsg() is None:
-                raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
+                if self.login:
+                    raise DtsgTokenStillInvalidError(
+                        "still invalid after using a new fb_dstg token."
+                    )
                 
+            self.csrf_token = None
+            if self.login:
+                self.progress("Refreshing fb_dtsg token ...")
+                logger.info("Facebook rejected fb_dtsg, refreshing from error response")
+
+                refreshed = self._refresh_dtsg_from_response(response)
+                if not refreshed and self._get_csrf_token() is None:
+                    raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
+
             return self.post(
                 operation_name,
                 reference_page_url,
@@ -458,6 +520,20 @@ class FacebookContext:
                 _retried_count=_retried_count + 1,
             )
 
+        return response
+
+    def post_ajax_navigation(self, user_id, collection_name):
+        """POST to a Facebook /ajax/navigation endpoint"""
+        data = {
+            "route_url": f"/profile.php?id={user_id}&sk={collection_name}",
+            "lsd": self.csrf_token
+        }
+
+        response = self.post("https://web.facebook.com/ajax/navigation/", data=data)
+        if self.debug:
+            self.debug_response(
+                response=response,
+            )
         return response
 
     def parse_graphql_response(self, raw):
@@ -597,7 +673,7 @@ class FacebookGraphQL:
         self.context = context
 
     def send(self, variables):
-        return self.context.post(
+        return self.context.post_graphql(
             operation_name=self.OPERATION_NAME,
             reference_page_url=self.REFERENCE_PAGE_URL,
             variables=variables,

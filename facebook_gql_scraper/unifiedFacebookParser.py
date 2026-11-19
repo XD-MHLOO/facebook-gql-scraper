@@ -413,12 +413,14 @@ def _extract_group_from_view_model(vm) -> Optional[ParserGroup]:
 def parse_profile_collection_ids(data: dict) -> ParserProfileRef:
     """Parse a profile header payload into a ParserProfileRef with tabs."""
 
-    user = (
+    profile_header_renderer = (
         data.get("data", {})
         .get("user", {})
         .get("profile_header_renderer", {})
-        .get("user", {})
     )
+    if profile_header_renderer is None:
+        return
+    user = profile_header_renderer.get("user", {})
 
     # Author Profile Extraction
     status_text = (
@@ -1012,7 +1014,7 @@ def parse_timeline_app_collection_aggregated_fb_shorts(data) -> ParserCollection
 
             video_url = None
             for item in (
-                media.get("videoDeliveryResponseFragment", {})
+                (media.get("videoDeliveryResponseFragment", {}) or {})
                 .get("videoDeliveryResponseResult", {})
                 .get("progressive_urls", [])
             ):
@@ -1041,7 +1043,6 @@ def parse_timeline_app_collection_aggregated_fb_shorts(data) -> ParserCollection
                     creation_time=media.get("created_time"),
                     thumbnail_image_url=(media.get("thumbnailImage") or {}).get("uri"),
                     video_url=video_url,
-                    play_count=media.get("play_count_reduced"),
                 ),
             )
 
@@ -1124,12 +1125,13 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
         # --- User result ---
         if role == "ENTITY_USER":
             profile = vm.get("profile")
+            logging_model = vm.get("logging_model")
             if not profile or profile.get("__typename") != "User":
                 continue
 
             profiles.append(
                 ParserProfileRef(
-                    id=profile.get("id"),
+                    id=logging_model.get("tapped_result_id"),
                     name=profile.get("name"),
                     url=profile.get("url"),
                     profile_picture_url=(profile.get("profile_picture") or {}).get("uri"),
@@ -1535,7 +1537,8 @@ def parse_media_post_photo(data) -> Optional[ParserMediaPost]:
 
     creation_story = data_currMedia.get("creation_story") or {}
     container_story = data_currMedia.get("container_story") or {}
-    text = (creation_story.get("message") or {}).get("text")
+
+    text = (currMedia.get("message") or {}).get("text")
 
     group_id = None
     target_group = creation_story.get("target_group")
@@ -1586,8 +1589,8 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
 
     video_url = None
     for item in (
-        data_currMedia
-        .get("videoDeliveryResponseFragment", {})
+        (data_currMedia
+        .get("videoDeliveryResponseFragment", {}) or {})
         .get("videoDeliveryResponseResult", {})
         .get("progressive_urls", [])
     ):
@@ -1635,6 +1638,7 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
     if target_group is not None:
         group_id=target_group.get("id")
 
+
     return ParserMediaPost(
         id=data_currMedia.get("id"),
         url=currMedia.get("url"),
@@ -1654,7 +1658,7 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
             thumbnail_image_url=thumbnail.get("uri"),
             video_url=video_url,
             length_in_second=length_in_second,
-            creation_time=video_creation_time
+            creation_time=video_creation_time,
         ),
         nextMediaAfterNodeId=((data.get("mediaset") or {}).get("nextMediaAfterNodeId") or {}).get("id"),
         group_id=group_id,

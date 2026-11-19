@@ -52,6 +52,15 @@ pip install facebook-gql-scraper
 
 ## Quick start
 
+### Authentication modes
+
+The scraper supports two modes:
+
+- **Anonymous mode:** No account required. Limited to public data with strict rate limits; results may be incomplete.
+- **Authenticated mode:** Requires a valid Facebook session cookie file. Provides broader data access and more lenient rate limits.
+
+#### Export Facebook cookies (Authenticated mode)
+
 Export your Facebook session cookies as JSON and save them as
 `facebook_cookies.json` in your working directory.
 
@@ -65,7 +74,12 @@ See [How to Identify a Facebook URL](https://XD-MHLOO.github.io/facebook-gql-scr
 ```python
 import facebook_gql_scraper as fgs
 
+# Authenticated mode
 ctx = fgs.FacebookContext(cookies_file="facebook_cookies.json")
+
+# Anonymous mode (omit cookies_file)
+# ctx = fgs.FacebookContext()
+
 user = fgs.Profile.from_user_id(ctx, user_id="100084254631043")
 # Or from username: user = fgs.Profile.from_username(ctx, username="Ishowspeed")
 print(user.name)
@@ -163,7 +177,7 @@ for mp in user.get_photo_posts():
 
 # User's video posts (reels) → MediaPost[Video]
 for mp in user.get_video_posts():
-    print(mp.id, mp.media.video_url, mp.media.play_count)
+    print(mp.id, mp.media.video_url)
 
 # Users following this user → Profile
 for follower in user.get_followers():

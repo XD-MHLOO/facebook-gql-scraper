@@ -36,8 +36,16 @@ Base class for all errors raised by this library.
   <Prop name="DtsgTokenFetchError" type="Exception">
     Failed to obtain the fb_dtsg token. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
   </Prop>
+  <Prop name="LsdTokenFetchError" type="Exception">
+    Failed to obtain the lsd token from Facebook.
+    <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
+  </Prop>
   <Prop name="EmptyNodeError" type="Exception">
     Facebook returned an empty node response — usually transient server glitch. Raised only after the automatic retry also came back empty. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
+  </Prop>
+  <Prop name="RateLimitExceededError" type="Exception">
+    Facebook rate limit was exceeded.
+    <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
   </Prop>
 </Props>
 
@@ -72,6 +80,10 @@ Base class for all errors raised by this library.
   </Prop>
   <Prop name="ResourceNotAvailableException" type="Exception">
     The resource exists but is not exposed by this profile or group. <br /> Inherits [`FacebookAccessException`](#access-errors).
+  </Prop>
+  <Prop name="LoginRequiredError" type="Exception">
+    The requested resource or data is only available to logged-in Facebook users.
+    <br /> Inherits [`FacebookAccessException`](#access-errors).
   </Prop>
   <Prop name="FollowersNotAvailableException" type="Exception">
     The profile does not expose its followers list. <br /> Inherits [`ResourceNotAvailableException`](#access-errors).

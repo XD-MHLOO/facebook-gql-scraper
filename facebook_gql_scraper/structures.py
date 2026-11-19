@@ -42,6 +42,8 @@ from .exceptions import (
     InvalidIdTypeError,
 )
 
+from .get_collection_token import get_collection_token
+
 
 class Photo(NamedTuple):
     """
@@ -71,8 +73,6 @@ class Video(NamedTuple):
     :vartype thumbnail_image_url: str or None
     :ivar video_url: Direct URL of the video.
     :vartype video_url: str or None
-    :ivar play_count: Number of times the video has been played.
-    :vartype play_count: str or None
     :ivar fallback_image_url: Fallback image URL for the video.
     :vartype fallback_image_url: str or None
     """
@@ -82,7 +82,6 @@ class Video(NamedTuple):
     creation_time: Optional[int] = None
     thumbnail_image_url: Optional[str] = None
     video_url: Optional[str] = None
-    play_count: Optional[str] = None
     fallback_image_url: Optional[str] = None
 
 class AnimatedImage(NamedTuple):
@@ -248,7 +247,6 @@ def _dict_to_attachment(att: dict) -> Optional[Photo | Video | AnimatedImage| Ex
             creation_time=att.get("creation_time"),
             thumbnail_image_url=att.get("thumbnail_image_url"),
             video_url=att.get("video_url"),
-            play_count=att.get("play_count"),
             fallback_image_url=att.get("fallback_image_url"),
         )
     elif t == "genericMediaAnimatedImage":
@@ -827,6 +825,7 @@ class MediaPost(PostBase, Generic[M]):
 
     @property
     def media(self) -> Optional[M]:
+        self._obtain_metadata()
         data = self._field("media")
         if data is None:
             return None
@@ -843,7 +842,6 @@ class MediaPost(PostBase, Generic[M]):
                 creation_time=data.get("creation_time"),
                 thumbnail_image_url=data.get("thumbnail_image_url"),
                 video_url=data.get("video_url"),
-                play_count=data.get("play_count"),
                 fallback_image_url=data.get("fallback_image_url"),
             )
         if t == "sticker":
@@ -1402,6 +1400,25 @@ class Profile(FacebookModel):
             for i in _items(getattr(names_col, "nicknames", None))
         ]
 
+
+        if self._context.login == False:
+            for tab_name in type(profile.tabs).model_fields:
+                tab_data = getattr(profile.tabs, tab_name)
+
+                if tab_data is None:
+                    continue
+
+                for collection_name, collection_value in tab_data.collections.items():
+                    if collection_value is None:
+                        response = self._context.post_ajax_navigation(
+                            profile.id, collection_name
+                        )
+
+                        value = get_collection_token(response.text)
+
+                        tab_data.collections.update({
+                            collection_name: value
+                        })
         tabs_dict = {}
         if profile.tabs:
             for tab_name in ("About", "Followers", "Friends", "Photos", "Reels"):
@@ -1450,6 +1467,7 @@ class Profile(FacebookModel):
 
         self._data.update(user_data)
         self._full_fetched = True
+
 
     # ---------- identity / profile ----------
 

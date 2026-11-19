@@ -39,6 +39,8 @@ class MarketplaceListingNotFoundError(FacebookNotFoundError):
 class ResourceNotAvailableException(FacebookAccessException):
     """The resource exists but is not exposed by this profile/group."""
 
+class LoginRequiredError(FacebookAccessException):
+    """The requested resource or data is only available to logged-in Facebook users."""
 
 class FollowersNotAvailableException(ResourceNotAvailableException):
     """The profile does not expose its followers list."""
@@ -71,9 +73,11 @@ class DocIdStillInvalidError(FacebookGqlScraperException):
 class DtsgTokenStillInvalidError(FacebookGqlScraperException):
     """Facebook rejected the fb_dtsg token even after re-capturing."""
 
-
 class DtsgTokenFetchError(FacebookGqlScraperException):
     """Failed to obtain the fb_dtsg token from Facebook."""
+
+class LsdTokenFetchError(FacebookGqlScraperException):
+    """Failed to obtain the lsd token from Facebook."""
 
 class SchemaChangedError(FacebookGqlScraperException):
     """Facebook's GraphQL schema for an operation changed — variables no longer match."""
@@ -81,6 +85,8 @@ class SchemaChangedError(FacebookGqlScraperException):
 class EmptyNodeError(FacebookGqlScraperException):
     """Facebook return empty node response."""
 
+class RateLimitExceededError(FacebookGqlScraperException):
+    """Facebook rate limit was exceeded. Requests are temporarily restricted."""
 # ---------- invalid usage ----------
 
 class InvalidUsageError(FacebookGqlScraperException, ValueError):

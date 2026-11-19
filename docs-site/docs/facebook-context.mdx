@@ -19,11 +19,17 @@ Creates a Facebook request context.
 
 <code className="signature">FacebookContext(cookies_file, state_file, user_agent, proxy, quiet, debug, debug_dir)</code>
 
+
+## Authentication modes
+
+- **Anonymous mode:** No cookie file required. Access is limited to public data. Subject to stricter rate limits, and returned data may be incomplete.
+- **Authenticated mode:** Requires a valid Facebook cookies JSON file. Provides access to more data, subject to account permissions, with significantly lower rate limits.
+
 ## Parameters
 
 <Props>
-  <Prop name="cookies_file" type="str">
-    Path to the Facebook cookies JSON file. Defaults to <code>"facebook_cookies.json"</code>.
+  <Prop name="cookies_file" type="str | None">
+    Path to the Facebook cookies JSON file. Optional. When provided, the scraper uses the supplied Facebook session cookies for authenticated requests. When omitted, requests are made without logging in.
   </Prop>
   <Prop name="state_file" type="str">
     Path where request state is persisted between runs. Defaults to <code>"facebook_state.json"</code>.
