@@ -464,7 +464,7 @@ class FacebookContext:
             logger.info("doc_id invalid for %s", operation_name)
             self._invalidate_doc_id(operation_name)
 
-            return self.post(
+            return self.post_graphql(
                 operation_name,
                 reference_page_url,
                 variables,
@@ -496,7 +496,7 @@ class FacebookContext:
                 if not refreshed and self._get_csrf_token() is None:
                     raise DtsgTokenFetchError("Failed to refetch a new fb_dtsg token.")
 
-            return self.post(
+            return self.post_graphql(
                 operation_name,
                 reference_page_url,
                 variables,
@@ -513,7 +513,7 @@ class FacebookContext:
             self.progress("Facebook returned empty node. Retrying with backoff ...")
             logger.info("empty node response for %s — retrying", operation_name)
 
-            return self.post(
+            return self.post_graphql(
                 operation_name,
                 reference_page_url,
                 variables,
