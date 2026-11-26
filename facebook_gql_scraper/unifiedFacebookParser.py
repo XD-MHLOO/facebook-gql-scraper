@@ -1103,7 +1103,8 @@ def parse_group_members(data) -> ParserGroupMembersPage:
 def parse_facebook_serp_search(response) -> ParserSearchResults:
     """
     Parse a Facebook SERP (search engine results page) response.
-    Handles user results (role == "ENTITY_USER") and post results (role == "TOP_PUBLIC_POSTS").
+    Handles user results (role == "ENTITY_USER"), page results (role == "ENTITY_PAGES"),
+    group results, and post results (role == "TOP_PUBLIC_POSTS").
     """
     serp = response.get("data", {}).get("serpResponse") or response.get("serpResponse")
     if not serp:
@@ -1115,6 +1116,7 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
     profiles = []
     posts = []
     groups = []
+    pages = []
 
     for edge in edges:
         node = edge.get("node", {})
@@ -1136,6 +1138,36 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
                     url=profile.get("url"),
                     profile_picture_url=(profile.get("profile_picture") or {}).get("uri"),
                     is_verified=profile.get("is_verified"),
+                )
+            )
+
+        # --- Page result ---
+        # Pages come back under their own module role. The node itself is a "User"
+        # actor (new Pages experience), so the role - not __typename - identifies it.
+        elif role == "ENTITY_PAGES":
+            page = vm.get("profile")
+            logging_model = vm.get("logging_model") or {}
+            if not page:
+                continue
+
+            # e.g. "Charitable organisation \u00b7 HaMasger 15, Bet Shemesh \u00b7 133K followers"
+            snippet = (vm.get("primary_snippet_text_with_entities") or {}).get("text")
+            parts = [s.strip() for s in snippet.split("\u00b7")] if snippet else []
+            followers = next(
+                (s[: -len(" followers")] for s in parts if s.endswith(" followers")), None
+            )
+            category = parts[0] if parts and not parts[0].endswith(" followers") else None
+
+            pages.append(
+                ParserPageRef(
+                    id=logging_model.get("tapped_result_id") or page.get("id"),
+                    name=page.get("name"),
+                    url=page.get("url") or page.get("profile_url"),
+                    profile_picture_url=(page.get("profile_picture") or {}).get("uri"),
+                    is_verified=page.get("is_verified"),
+                    category=category,
+                    followers_count=followers,
+                    snippet=snippet,
                 )
             )
 
@@ -1168,6 +1200,7 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
         profiles=profiles,
         posts=posts,
         groups=groups,
+        pages=pages,
         page_info=ParserPageInfo(
             has_next_page=page_info.get("has_next_page", False),
             end_cursor=page_info.get("end_cursor"),

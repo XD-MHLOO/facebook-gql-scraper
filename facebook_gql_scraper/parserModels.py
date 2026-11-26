@@ -85,6 +85,18 @@ class ParserProfileRef(_Base):
     about: Optional[Dict[str, ParserAboutSection]] = None
 
 
+class ParserPageRef(_Base):
+    type: Literal["page"] = "page"
+    id: Optional[str] = None
+    name: Optional[str] = None
+    url: Optional[str] = None
+    profile_picture_url: Optional[str] = None
+    is_verified: Optional[bool] = None
+    category: Optional[str] = None
+    followers_count: Optional[str] = None
+    snippet: Optional[str] = None
+
+
 # ---------- group ----------
 
 class ParserGroup(_Base):
@@ -235,6 +247,7 @@ class ParserSearchResults(_Base):
     profiles: List[ParserProfileRef] = Field(default_factory=list)
     posts: List[ParserFeedPost] = Field(default_factory=list)
     groups: List[ParserGroup] = Field(default_factory=list)
+    pages: List[ParserPageRef] = Field(default_factory=list)
     page_info: ParserPageInfo = Field(default_factory=ParserPageInfo)
 
 

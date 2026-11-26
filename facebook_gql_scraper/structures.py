@@ -3470,6 +3470,10 @@ class SearchEngine:
     ) -> PaginatedIterator[Group]: ...
     @overload
     def search(
+        self, text: str, filter_type: Literal["page"], exact_match: bool = ...
+    ) -> PaginatedIterator[Profile]: ...
+    @overload
+    def search(
         self, text: str, filter_type: Literal["all"] = ..., exact_match: bool = ...
     ) -> PaginatedIterator[Profile | PostBase | Group]: ...
 
@@ -3480,12 +3484,14 @@ class SearchEngine:
         :param text: Search text.
         :type text: str
         :param filter_type: Result type to search for. Supported values are
-            ``"all"``, ``"profile"``, ``"post"``, and ``"group"``.
+            ``"all"``, ``"profile"``, ``"post"``, ``"group"``, and ``"page"``.
+            ``"profile"`` returns people; ``"page"`` returns Facebook Pages.
         :type filter_type: str
         :param exact_match: Whether to return only exact matches.
         :type exact_match: bool
         :return: Iterator yielding :class:`Profile`, :class:`Post`,
-            :class:`MediaPost`, or :class:`Group` objects.
+            :class:`MediaPost`, or :class:`Group` objects. Page results are
+            returned as :class:`Profile` objects.
         :rtype: PaginatedIterator
         """
 
@@ -3512,6 +3518,9 @@ class SearchEngine:
             for g in page.groups:
                 raw.append(("group", g.model_dump(exclude_none=True)))
 
+            for pg in page.pages:
+                raw.append(("page", pg.model_dump(exclude_none=True)))
+
             page_info = {
                 "has_next_page": page.page_info.has_next_page,
                 "end_cursor": page.page_info.end_cursor,
@@ -3520,7 +3529,7 @@ class SearchEngine:
 
         def item_wrapper(raw):
             kind, data = raw
-            if kind == "profile":
+            if kind in ("profile", "page"):   # a Page is modelled as a Profile
                 return Profile(self._context, data)
             if kind == "media_post":
                 return MediaPost(self._context, data)
