@@ -27,6 +27,8 @@ const sidebars = {
         'models/reactor',
         'models/seller',
         'models/partner-seller',
+        'models/page',
+        'models/advertisement',
       ],
     },
     'search-engine',

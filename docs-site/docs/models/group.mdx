@@ -37,7 +37,7 @@ The groupname is resolved to an ID using regex matching. Prefer `from_group_id` 
 
 <Props>
   <Prop name="id" type="str">Group ID.</Prop>
-  <Prop name="name" type="str | None">Group name.</Prop>
+  <Prop name="display name" type="str | None">Group display name.</Prop>
   <Prop name="url" type="str | None">Group URL.</Prop>
   <Prop name="member_count" type="str | None">Member count as a display string, e.g. <code>"1.2M members"</code>.</Prop>
   <Prop name="profile_picture_url" type="str | None">URL of the group picture.</Prop>
@@ -69,5 +69,5 @@ group = fgs.Group.from_group_id(context, group_id="2781022932139267")
 # Or from groupname: group = fgs.Group.from_groupname(ctx, groupname="workingmemes")
 
 for member in group.get_members():
-    print(member.join_status, member.contribution_score, member.profile.name)
+    print(member.join_status, member.contribution_score, member.profile.display_name)
 ```

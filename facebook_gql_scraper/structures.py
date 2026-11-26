@@ -1,4 +1,5 @@
 from typing import NamedTuple, Optional, Iterator, TypeVar, Literal, overload, Generic
+from datetime import datetime, timezone
 
 import re
 from urllib.parse import urlparse, urlsplit, urlunsplit
@@ -10,6 +11,7 @@ from .facebookGraphql import (
     ProfileCometHeaderQueryGraphQL,
     ProfileCometAppCollectionListRendererPaginationQueryGraphQL,
     ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL,
+    ProfileCometDirectoryAuthenticityModalQueryGraphQL,
     ProfileCometTimelineFeedRefetchQueryGraphQL,
     CometSinglePostDialogContentQueryGraphQL,
     CommentsListComponentsPaginationQueryGraphQL,
@@ -25,7 +27,10 @@ from .facebookGraphql import (
     MarketplacePDPC2CMediaViewerWithImagesQueryGraphQL,
     CometPhotoRootContentQueryGraphQL,
     GroupsCometMediaPhotosTabGridQueryGraphQL,
-    GroupsCometMediaVideosTabGridQueryGraphQL
+    GroupsCometMediaVideosTabGridQueryGraphQL,
+    AdLibraryV3AdCollationDetailsQueryGraphQL,
+    AdLibrarySearchPaginationQueryGraphQL,
+    AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL
 )
 from .exceptions import (
     FollowersNotAvailableException,
@@ -39,7 +44,10 @@ from .exceptions import (
     MediaPostNotFoundError,
     GroupNotFoundError,
     MarketplaceListingNotFoundError,
+    AdvertisementNotFoundError,
     InvalidIdTypeError,
+    ProfileNotAvailableException,
+    PageNotFoundError,
 )
 
 from .get_collection_token import get_collection_token
@@ -230,7 +238,50 @@ class PartnerSeller(NamedTuple):
     number_of_sold_listings: Optional[int] = None
     average_ship_time: Optional[str] = None
 
+class AdImage(NamedTuple):
+    image_url: Optional[str] = None
 
+
+class AdVideo(NamedTuple):
+    video_url: Optional[str] = None
+    preview_image_url: Optional[str] = None
+
+
+class AdCard(NamedTuple):
+    title: Optional[str] = None
+    body: Optional[str] = None
+    link_description: Optional[str] = None
+    link_url: Optional[str] = None
+    cta_type: Optional[str] = None
+    cta_text: Optional[str] = None
+    image: Optional[AdImage] = None
+    video: Optional[AdVideo] = None
+
+
+class AdSnapshot(NamedTuple):
+    primary_text: Optional[str] = None
+    headline: Optional[str] = None
+    page_categories: Optional[tuple[str, ...]] = None
+    page_like_count: Optional[int] = None
+    link_url: Optional[str] = None
+    display_format: Optional[str] = None
+    cta_type: Optional[str] = None
+    cta_text: Optional[str] = None
+    images: Optional[tuple[AdImage, ...]] = None
+    videos: Optional[tuple[AdVideo, ...]] = None
+    cards: Optional[tuple[AdCard, ...]] = None
+    extra_links: Optional[tuple[str, ...]] = None
+    extra_texts: Optional[tuple[dict, ...]] = None
+    extra_images: Optional[tuple[AdImage, ...]] = None
+    extra_videos: Optional[tuple[AdVideo, ...]] = None
+
+class AdFevInfo(NamedTuple):
+    authorized_entity_text: Optional[str] = None
+    submitted_on: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    website: Optional[str] = None
+    address: Optional[str] = None
 
 def _dict_to_attachment(att: dict) -> Optional[Photo | Video | AnimatedImage| ExternalLink | Sticker]:
     """Convert a raw attachment dict into a typed NamedTuple, or None for unknown types."""
@@ -638,18 +689,10 @@ class PostBase(FacebookModel):
         if self._owner:
             return self._owner
 
-        if self._field("author", None) is not None:
-            data = self._field("author")
+        data = self._field("author", None)
 
-            return Profile(
-                self._context,
-                {
-                    "id": data.get("id"),
-                    "name": data.get("name"),
-                    "url": data.get("url"),
-                    "profile_picture_url": data.get("profile_picture_url"),
-                },
-            )
+        if data is not None:
+            return Profile(self._context, data)
 
         return None
 
@@ -1143,7 +1186,10 @@ class Profile(FacebookModel):
 
     def __init__(self, context, data):
         super().__init__(context, data)
-        assert "id" in self._data, "User requires id"
+
+        assert "id" in self._data or "username" in self._data, (
+            "Profile requires id or username"
+        )
         self._full_fetched = False
 
     @property
@@ -1157,8 +1203,17 @@ class Profile(FacebookModel):
         if self._full_fetched:
             return
 
+        user_id = self._data.get("id")
+
+        # Resolve username first
+        if not user_id and self._data.get("username"):
+            resolved_profile = Profile.from_username(self._context, self._data.get("username"))
+            self._data.update(resolved_profile._data)
+            self._full_fetched = resolved_profile._full_fetched
+            return
+        
         user_collection_ids_graphql = ProfileCometHeaderQueryGraphQL(self._context)
-        response_user_collection_ids = user_collection_ids_graphql.send(userId=self.id)
+        response_user_collection_ids = user_collection_ids_graphql.send(userId=user_id)
         parsed_user_collection_ids = self._context.parse_graphql_response(
             response_user_collection_ids.text
         )
@@ -1401,7 +1456,7 @@ class Profile(FacebookModel):
         ]
 
 
-        if self._context.login == False:
+        if not self._context.login:
             for tab_name in type(profile.tabs).model_fields:
                 tab_data = getattr(profile.tabs, tab_name)
 
@@ -1428,9 +1483,22 @@ class Profile(FacebookModel):
                     if tab else {"id": None, "collections": {}}
                 )
 
+        
+        delegate_page_graphql = ProfileCometDirectoryAuthenticityModalQueryGraphQL(self._context)
+        response_delegate_page = delegate_page_graphql.send(userId=self.id)
+        parsed_delegate_page = self._context.parse_graphql_response(
+            response_delegate_page.text
+        )
+
+        page_id = None
+        if parsed_delegate_page is not None and parsed_delegate_page.parsed_data is not None:
+            page_id = parsed_delegate_page.parsed_data.page_id
+
+
         user_data = {
             "id": profile.id,
-            "name": profile.name,
+            "username": profile.username,
+            "display_name": profile.display_name,
             "alternate_name": profile.alternate_name,
             "gender": profile.gender,
             "url": profile.url,
@@ -1463,6 +1531,7 @@ class Profile(FacebookModel):
             "business_address": business_address,
             "business_hours": business_hours,
             "tabs": tabs_dict,
+            "page_id": page_id,
         }
 
         self._data.update(user_data)
@@ -1482,14 +1551,34 @@ class Profile(FacebookModel):
         return self._field("id")
 
     @property
-    def name(self) -> Optional[str]:
+    def page_id(self) -> str:
+        """
+        Unique identifier of the Facebook profile's page.
+
+        :return: Facebook user's page ID.
+        :rtype: str
+        """
+        return self._field("page_id")
+
+    @property
+    def username(self) -> Optional[str]:
+        """
+        Username of the profile.
+
+        :return: Profile name.
+        :rtype: str or None
+        """
+        return self._field("username")
+
+    @property
+    def display_name(self) -> Optional[str]:
         """
         Display name of the profile.
 
         :return: Profile name.
         :rtype: str or None
         """
-        return self._field("name")
+        return self._field("display_name")
 
     @property
     def alternate_name(self) -> Optional[str]:
@@ -2422,19 +2511,10 @@ class Comment(FacebookModel):
         if self._owner:
             return self._owner
 
-        if self._field("author", None) is not None:
-            data = self._field("author")
+        data = self._field("author", None)
 
-            return Profile(
-                self._context,
-                {
-                    "id": data.get("id"),
-                    "name": data.get("name"),
-                    "gender": data.get("gender"),
-                    "url": data.get("url"),
-                    "profile_picture_url": data.get("profile_picture_url"),
-                },
-            )
+        if data is not None:
+            return Profile(self._context, data)
 
         return None
 
@@ -2511,7 +2591,7 @@ class Group(FacebookModel):
 
         self._data.update({
             "id": partial.id,
-            "name": partial.name,
+            "display_name": partial.display_name,
             "url": partial.url,
             "member_count": partial.member_count,
             "profile_picture_url": partial.profile_picture_url,
@@ -2535,14 +2615,14 @@ class Group(FacebookModel):
         return self._field("id")
 
     @property
-    def name(self) -> Optional[str]:
+    def display_name(self) -> Optional[str]:
         """
-        Name of the Facebook group.
+        Dsiplay Name of the Facebook group.
 
-        :return: Group name.
+        :return: Group display name.
         :rtype: str or None
         """
-        return self._field("name")
+        return self._field("display_name")
 
     @property
     def url(self) -> Optional[str]:
@@ -2906,7 +2986,7 @@ class MarketplaceListing(FacebookModel):
             "seller": {
                 "profile": {
                     "id": seller.profile.id if seller and seller.profile else None,
-                    "name": seller.profile.name if seller and seller.profile else None,
+                    "display_name": seller.profile.display_name if seller and seller.profile else None,
                     "profile_picture_url": seller.profile.profile_picture_url if seller and seller.profile else None,
                 },
                 "joined_time": seller.joined_time if seller else None,
@@ -2925,7 +3005,7 @@ class MarketplaceListing(FacebookModel):
             "partner": {
                 "profile": {
                     "id": partner.profile.id if partner and partner.profile else None,
-                    "name": partner.profile.name if partner and partner.profile else None,
+                    "display_name": partner.profile.display_name if partner and partner.profile else None,
                     "profile_picture_url": partner.profile.profile_picture_url if partner and partner.profile else None,
                 },
                 "partner_brand_name": partner.partner_brand_name if partner else None,
@@ -3345,14 +3425,7 @@ class MarketplaceListing(FacebookModel):
             combined_stats = seller_data.get("seller_buyer_combined") or {}
 
             return Seller(
-                profile=Profile(
-                    self._context,
-                    {
-                        "id": profile_data.get("id"),
-                        "name": profile_data.get("name"),
-                        "profile_picture_url": profile_data.get("profile_picture_url"),
-                    },
-                ),
+                profile=Profile(self._context, profile_data),
                 is_verified=seller_data.get("verified_badge"),
                 seller_ratings_average=seller_stats.get("five_star_ratings_average"),
                 seller_ratings_count=seller_stats.get(
@@ -3373,14 +3446,7 @@ class MarketplaceListing(FacebookModel):
             )
 
         return Seller(
-            profile=Profile(
-                self._context,
-                {
-                    "id": seller_data.get("id"),
-                    "name": seller_data.get("name"),
-                    "profile_picture_url": seller_data.get("profile_picture_url"),
-                },
-            ),
+            profile=Profile(self._context, seller_data),
         )
 
     @property
@@ -3405,14 +3471,7 @@ class MarketplaceListing(FacebookModel):
         profile_data = partner_data.get("profile") or {}
 
         return PartnerSeller(
-            profile=Profile(
-                self._context,
-                {
-                    "id": profile_data.get("id"),
-                    "name": profile_data.get("name"),
-                    "profile_picture_url": profile_data.get("profile_picture_url"),
-                },
-            ),
+            profile=Profile(self._context, profile_data),
             partner_brand_name=partner_data.get("partner_brand_name"),
             seller_review_count=partner_data.get("seller_review_count"),
             seller_positive_ratings_pct=partner_data.get("seller_positive_ratings_pct"),
@@ -3444,15 +3503,459 @@ class MarketplaceListing(FacebookModel):
         listing._obtain_metadata()
         return listing
 
-
-class SearchEngine:
+class Page(FacebookModel):
     """
-    Facebook search service.
+    Facebook Page.
+
+    A Page may initially be created with only partial data. Additional
+    metadata (display name, URL, profile picture, etc.) is fetched lazily
+    when required.
 
     :param context: Facebook context used for GraphQL requests.
     :type context: FacebookContext
+    :param data: Initial Page data.
+    :type data: dict
+    """
+    def __init__(self, context: FacebookContext, data: dict):
+        super().__init__(context, data)
+        assert "id" in self._data, "Facebook Page requires id"
+        self._full_fetched = False
+
+    def _obtain_metadata(self):
+        
+        if self._full_fetched:
+            return
+        
+        ad_lib_mobile_graphql = AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(self._context)
+        response_ad_lib_mobile_graphql = ad_lib_mobile_graphql.send(pageId=self.id)
+        parsed = self._context.parse_graphql_response(response_ad_lib_mobile_graphql.text)
+
+        if parsed is None or parsed.parsed_data is None or parsed.parsed_data.page is None:
+                raise PageNotFoundError(f"Page not found: {self.id}")
+
+        page: ParserPageRef = parsed.parsed_data.page
+
+
+        self._data.update(page.model_dump(exclude_none=True))
+        self._full_fetched = True
+
+    @property
+    def _identity(self):
+        return self._field("id")
+
+    @property
+    def id(self) -> str:
+        """
+        Unique identifier of the Facebook Page ID.
+
+        :return: Facebook Page ID.
+        :rtype: str
+        """
+        return self._field("id")
+    
+    @property
+    def display_name(self) -> Optional[str]:
+        """
+        Display name of the page profile.
+
+        :return: Page profile name.
+        :rtype: str or None
+        """
+        return self._field("display_name")
+
+    @property
+    def url(self) -> Optional[str]:
+        """
+        URL of the page profile.
+
+        :return: Page profile URL.
+        :rtype: str or None
+        """
+        return self._field("url")
+
+    @property
+    def profile_picture_url(self) -> Optional[str]:
+        """
+        URL of the Page profile picture.
+
+        :return: Page profile picture URL.
+        :rtype: str or None
+        """
+        return self._field("profile_picture_url")
+    
+    def get_profile(self) -> Optional[Profile]:
+        """
+        Get the personal profile associated with this Page.
+
+        :return: Associated personal profile, if available.
+        :rtype: Profile or None
+        """
+
+        url = self.url
+
+        hostname = (urlparse(url).hostname or "").lower()
+        if not re.fullmatch(r"(?:[\w-]+\.)*(?:facebook\.com|fb\.com)", hostname):
+            raise ProfileNotAvailableException(
+                "This Page is not associated with a personal Facebook profile. "
+                "It may belong to another platform."
+            )
+
+        profile_ref = ParserProfileRef(
+            url=self.url,
+            display_name=self.display_name,
+            profile_picture_url=self.profile_picture_url,
+            page_id=self.id,
+        )
+        return Profile(
+            self._context,
+            profile_ref.model_dump(exclude_none=True),
+        )
+
+    @classmethod
+    def from_page_id(
+        cls,
+        context: FacebookContext,
+        page_id: str,
+    ) -> "Page":
+        """
+        Create a Page object from its Facebook Page ID.
+
+        :param context: Facebook context.
+        :type context: FacebookContext
+        :param page_id: Facebook Page ID.
+        :type page_id: str
+        :return: Retrieved Facebook Page.
+        :rtype: Page
+        """
+        page = cls(context, {"id": page_id})
+        page._obtain_metadata()
+        return page
+    
+class Advertisement(FacebookModel):
+    """
+    Represents a Facebook advertisement in the Meta Ad Library.
+
+    Provides access to advertisement details, including its status,
+    categories, running dates, publisher platforms, spending information,
+    creative snapshot, advertiser information, and associated Page.
+
+    Advertisement metadata is fetched lazily when required.
+
+    :param context: Facebook execution context.
+    :type context: FacebookContext
+    :param data: Raw advertisement data. Must contain an advertisement ID.
+    :type data: dict
     """
 
+    def __init__(self, context: FacebookContext, data: dict):
+        super().__init__(context, data)
+        assert "id" in self._data, "Advertisement requires id"
+        self._full_fetched = False
+
+    @property
+    def _identity(self):
+        return self._field("id")
+
+    def _obtain_metadata(self):
+        
+        if self._full_fetched:
+            return
+
+        ad_lib_mobile_graphql = AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(self._context)
+        response_ad_lib_mobile_graphql = ad_lib_mobile_graphql.send(deeplinkAdID=self.id)
+        parsed = self._context.parse_graphql_response(response_ad_lib_mobile_graphql.text)
+
+        if parsed is None or parsed.parsed_data is None or parsed.parsed_data.ad is None:
+            raise AdvertisementNotFoundError(f"Advertisement not found: {self.id}")
+
+        ad: ParserAd = parsed.parsed_data.ad
+
+        # ad is missing with collation prop. Here making use of SE to look for complete ad.
+        ad_found = None
+        ad_library = AdLibrarySearch(self._context)
+
+        # First Attempt (Direct ID)
+        for result_ad in ad_library.search(
+                query=self.id, 
+                filter_page_id=ad.page.id, 
+            ):
+            if result_ad.id == self.id:
+                ad_found = result_ad
+                break
+
+        # Second Attempt
+        if ad_found is None:
+            for result_ad in ad_library.search(
+                query="", 
+                filter_page_id=ad.page.id,
+                filter_active_status= "ACTIVE" if ad.is_active else "INACTIVE",
+                from_date=datetime.fromtimestamp(ad.start_date, timezone.utc).strftime("%Y-%m-%d") if ad.start_date else None, 
+                to_date=datetime.fromtimestamp(ad.end_date, timezone.utc).strftime("%Y-%m-%d") if ad.end_date else None
+            ):
+                if result_ad.id == self.id:
+                    ad_found = result_ad
+                    break
+
+        if ad_found is not None:
+            self._data.update(ad_found._data)
+        else:
+            self._data.update(ad.model_dump(exclude_none=True))
+        self._full_fetched = True
+
+    @property
+    def id(self) -> str:
+        """
+        Unique identifier of the advertisement.
+
+        :return: Facebook Advertisement ID.
+        :rtype: str
+        """
+        return self._field("id")
+    
+    @property
+    def is_active(self) -> Optional[bool]:
+        """
+        Whether the advertisement is currently active.
+
+        :return: Active status.
+        :rtype: bool or None
+        """
+        return self._field("is_active")
+
+    @property
+    def categories(self) -> Optional[list]:
+        """
+        Categories assigned to the advertisement.
+
+        :return: List of category labels.
+        :rtype: list or None
+        """
+        return self._field("categories")
+
+    @property
+    def start_date(self) -> Optional[int]:
+        """
+        Start date of the ad's run.
+
+        :return: Start date.
+        :rtype: int or None
+        """
+        return self._field("start_date")
+
+    @property
+    def end_date(self) -> Optional[int]:
+        """
+        End date of the ad's run.
+
+        :return: End date (format as returned by the GraphQL response, may be None).
+        :rtype: int or None
+        """
+        return self._field("end_date")
+
+    @property
+    def text(self) -> Optional[str]:
+        """
+        Body text of the advertisement.
+
+        :return: Ad text.
+        :rtype: str or None
+        """
+        return self._field("text")
+
+    @property
+    def publisher_platforms(self) -> Optional[list]:
+        """
+        Platforms the ad is published on (e.g. FACEBOOK, INSTAGRAM, ...).
+
+        :return: List of platform names.
+        :rtype: list or None
+        """
+        return self._field("publisher_platforms")
+
+    @property
+    def impressions(self) -> Optional[str]:
+        """
+        Estimated impression range.
+
+        :return: Impression range.
+        :rtype: str or None
+        """
+        return self._field("impressions")
+    
+    @property
+    def reach_estimate(self) -> Optional[str]:
+        """
+        Estimated audience reach.
+
+        :return: Estimated reach.
+        :rtype: str or None
+        """
+        return self._field("reach_estimate")
+    
+    @property
+    def currency(self) -> Optional[str]:
+        """
+        Currency used for the advertisement's spending information.
+
+        :return: Currency code.
+        :rtype: str or None
+        """
+        return self._field("currency")
+
+    @property
+    def spend(self) -> Optional[str]:
+        """
+        Estimated advertisement spending range.
+
+        :return: Spending range.
+        :rtype: str or None
+        """
+        return self._field("spend")
+    
+    @property
+    def snapshot(self) -> Optional[AdSnapshot]:
+        """
+        Advertisement creative snapshot.
+
+        :return: Advertisement snapshot.
+        :rtype: AdSnapshot or None
+        """
+        data = self._field("snapshot")
+        if data is None:
+            return None
+
+        return AdSnapshot(
+            **{
+                **data,
+                "images": tuple(AdImage(**x) for x in data.get("images", [])),
+                "videos": tuple(AdVideo(**x) for x in data.get("videos", [])),
+                "cards": tuple(
+                    AdCard(
+                        **{
+                            **card,
+                            "image": AdImage(**card["image"]) if card.get("image") else None,
+                            "video": AdVideo(**card["video"]) if card.get("video") else None,
+                        }
+                    )
+                    for card in data.get("cards", [])
+                ),
+                "extra_images": tuple(
+                    AdImage(**x) for x in data.get("extra_images", [])
+                ),
+                "extra_videos": tuple(
+                    AdVideo(**x) for x in data.get("extra_videos", [])
+                ),
+            }
+        )
+
+    @property
+    def page(self) -> Optional["Page"]:
+        """
+        Facebook Page associated with the advertisement.
+
+        :return: Associated Facebook Page.
+        :rtype: Page or None
+        """
+        data = self._field("page", None)
+
+        if data is not None:
+            return Page(self._context, data)
+
+        return None
+    
+    @property
+    def fev_info(self) -> Optional["AdFevInfo"]:
+        """
+        Advertiser verification and contact information.
+
+        :return: Advertiser information.
+        :rtype: AdFevInfo or None
+        """
+        data = self._field("fev_info", None)
+
+        if data is not None:
+            return AdFevInfo(**data)
+
+        return None
+    
+    @classmethod
+    def from_ad_id(
+        cls,
+        context: FacebookContext,
+        ad_id: str,
+    ) -> "Advertisement":
+        """
+        Create an Advertisement object from its ID.
+
+        :param context: Facebook execution context.
+        :type context: FacebookContext
+        :param ad_id: Advertisement ID.
+        :type ad_id: str
+        :return: Advertisement object.
+        :rtype: Advertisement
+        """
+
+        ad = cls(context, {"id": ad_id})
+        ad._obtain_metadata()
+        return ad
+    
+    def get_collation(self) -> PaginatedIterator["Advertisement"]:
+        """
+        Retrieve advertisements belonging to the same collation group.
+
+        A collation group contains advertisements that use the same or similar creatives, but may have slight variations in their content
+    
+        :return: Paginated iterator of collation.
+        :rtype: PaginatedIterator[Advertisement]
+        """
+
+        if self._field("collation_id") is None:
+            return PaginatedIterator.empty(
+                iterator_type="ad_collation",
+                query_variables={
+                    "collationGroupID": self._field("collation_id") ,
+                },
+            )
+        
+        ad_collation_graphql = AdLibraryV3AdCollationDetailsQueryGraphQL(self._context)
+
+        def request_fn(cursor):
+            return ad_collation_graphql.send(
+                collationGroupID=self._field("collation_id") ,
+                cursor=cursor,
+            ).text
+
+        def page_wrapper(parsed):
+            page: ParserAdsPage = parsed.parsed_data
+            raw_items = [ad.model_dump(exclude_none=True) for ad in page.ads]
+
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw):
+            ad = Advertisement(self._context, raw)
+            ad._full_fetched = True
+            return ad
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="ad_collation",
+            query_variables={"collationGroupID": self._field("collation_id")},
+        )
+    
+
+
+class GeneralSearch:
+    """
+    Search Facebook for profiles, posts, and groups.
+    """
+    
     def __init__(self, context: FacebookContext):
         self._context = context
 
@@ -3541,11 +4044,19 @@ class SearchEngine:
             },
         )
 
-    def search_marketplace(
+class MarketplaceSearch:
+    """
+    Search Facebook Marketplace listings.
+    """
+
+    def __init__(self, context: FacebookContext):
+        self._context = context
+
+    def search(
         self,
         query: str,
         *,
-        is_stock_available: bool = True,
+        is_stock_available: Optional[bool] = True,
         filter_location_latitude: float = 40.7128,
         filter_location_longitude: float = -74.0060,
         filter_price_lower_bound: int = 0,
@@ -3637,3 +4148,160 @@ class SearchEngine:
                 "sort_by": sort_by,
             },
         )
+
+class AdLibrarySearch:
+    """
+    Search Facebook advertisements in the Ad Library.
+    """
+
+    def __init__(self, context: FacebookContext):
+        self._context = context
+
+    def search(
+        self,
+        query: str,
+        *,
+        filter_page_id: str = "0",
+        filter_active_status: Literal["ALL", "ACTIVE", "INACTIVE"] = "ALL",
+        filter_country: str = "ALL",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> PaginatedIterator[Advertisement]:
+        """
+        Search Facebook advertisements in the Ad Library.
+
+        Yields :class:`Advertisement` objects lazily, paginating through
+        the Ad Library search GraphQL endpoint.
+
+        :param query: Search text.
+        :type query: str
+        :param filter_page_id: Restrict results to a specific Facebook Page ID.
+            Use ``"0"`` to search across all Pages.
+        :type filter_page_id: str
+        :param filter_active_status: Filter by advertisement status, e.g.
+            ``"ALL"``, ``"ACTIVE"``, or ``"INACTIVE"``.
+        :type filter_active_status: str
+        :param filter_country: Restrict results to a country ISO code,
+            or ``"ALL"`` to search across all countries.
+        :type filter_country: str
+        :param from_date: Start date for the search date range. YYYY-MM-DD
+        :type from_date: str or None
+        :param to_date: End date for the search date range. YYYY-MM-DD
+        :type to_date: str or None
+        :return: Iterator yielding :class:`Advertisement` objects.
+        :rtype: PaginatedIterator[Advertisement]
+        """
+
+        advertisement_search_graphql = AdLibrarySearchPaginationQueryGraphQL(
+            self._context
+        )
+
+        def request_fn(cursor):
+            return advertisement_search_graphql.send(
+                query=query,
+                cursor=cursor,
+                filter_page_id=filter_page_id,
+                filter_active_status=filter_active_status,
+                filter_country=filter_country,
+                from_date=from_date,
+                to_date=to_date,
+            ).text
+
+        def page_wrapper(parsed):
+            page: ParserAdsPage = parsed.parsed_data
+            raw_items = [ad.model_dump(exclude_none=True) for ad in page.ads]
+            page_info = {
+                "has_next_page": page.page_info.has_next_page,
+                "end_cursor": page.page_info.end_cursor,
+            }
+            return raw_items, page_info
+
+        def item_wrapper(raw):
+            ad = Advertisement(self._context, raw)
+            ad._full_fetched = True
+            return ad
+
+        return PaginatedIterator(
+            request_fn=request_fn,
+            parser=self._context.parse_graphql_response,
+            page_wrapper=page_wrapper,
+            item_wrapper=item_wrapper,
+            iterator_type="advertisement_search",
+            query_variables={
+                "query": query,
+                "filter_page_id": filter_page_id,
+                "filter_active_status": filter_active_status,
+                "filter_country": filter_country,
+                "from_date": from_date,
+                "to_date": to_date,
+            },
+        )
+
+    def count(
+        self,
+        query: str = "",
+        filter_page_id: str = "0",
+        filter_active_status: Literal["ALL", "ACTIVE", "INACTIVE"] = "ALL",
+        filter_country: str = "ALL",
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> Optional[int]:
+        """
+        Count advertisements in the Ad Library matching the given filters.
+
+        Sends a request to Facebook and returns the total number of matching
+        advertisements across all result pages, without fetching the ads
+        themselves. Accepts the same filters as :meth:`search`.
+
+        Example::
+
+            total = eg.search.ad_library.count("Nike", filter_country="US")
+
+        :param query: Search text. An empty string matches all ads allowed by
+            the other filters.
+        :type query: str
+        :param filter_page_id: Restrict the count to a specific Facebook Page ID.
+            Use ``"0"`` to count across all Pages.
+        :type filter_page_id: str
+        :param filter_active_status: Filter by advertisement status, one of
+            ``"ALL"``, ``"ACTIVE"``, or ``"INACTIVE"``.
+        :type filter_active_status: str
+        :param filter_country: Restrict to a country ISO code, or ``"ALL"`` to
+            count across all countries.
+        :type filter_country: str
+        :param from_date: Start of the date range, ``YYYY-MM-DD``.
+        :type from_date: str or None
+        :param to_date: End of the date range, ``YYYY-MM-DD``.
+        :type to_date: str or None
+        :return: Number of matching advertisements, or ``None`` if Facebook
+            returned no count.
+        :rtype: int or None
+        """
+            
+        ad_lib_mobile_graphql = AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(self._context)
+        response_ad_lib_mobile_graphql = ad_lib_mobile_graphql.send(
+            query=query,
+            pageId=filter_page_id,
+            filter_active_status=filter_active_status,
+            filter_country=filter_country,
+            from_date=from_date,
+            to_date=to_date,
+            )
+        parsed_ad_lib_mobile_graphql = self._context.parse_graphql_response(response_ad_lib_mobile_graphql.text)
+
+        ad = parsed_ad_lib_mobile_graphql.parsed_data.ad_count
+
+        return ad
+
+class SearchEngine:
+    """
+    Facebook search service.
+
+    :param context: Facebook context used for GraphQL requests.
+    :type context: FacebookContext
+    """
+
+    def __init__(self, context: FacebookContext):
+        self.general = GeneralSearch(context)
+        self.marketplace = MarketplaceSearch(context)
+        self.ad_library = AdLibrarySearch(context)

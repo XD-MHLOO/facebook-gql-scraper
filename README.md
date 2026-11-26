@@ -82,7 +82,7 @@ ctx = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
 user = fgs.Profile.from_user_id(ctx, user_id="100084254631043")
 # Or from username: user = fgs.Profile.from_username(ctx, username="Ishowspeed")
-print(user.name)
+print(user.display_name)
 ```
 > Pass `quiet=True` to `FacebookContext` to hide logs.
 ### Profile properties
@@ -90,7 +90,8 @@ print(user.name)
 ```python
 ## Identity/ Social
 user.id                 # "123"
-user.name               # "John Doe"
+user.username           # "john.doe"
+user.display_name       # "John Doe"
 user.alternate_name     # "john donut"
 user.gender             # "MALE"
 user.url                # "https://www.facebook.com/johndoe"
@@ -181,19 +182,19 @@ for mp in user.get_video_posts():
 
 # Users following this user → Profile
 for follower in user.get_followers():
-    print(follower.id, follower.name)
+    print(follower.id, follower.display_name)
 
 # Users this user follows → Profile
 for followee in user.get_followees():
-    print(followee.id, followee.name)
+    print(followee.id, followee.display_name)
 
 # Friends who follow this user → Profile
 for friend in user.get_friends_followers():
-    print(friend.id, friend.name)
+    print(friend.id, friend.display_name)
 
 # Friends this user follows → Profile
 for friend in user.get_friends_followees():
-    print(friend.id, friend.name)
+    print(friend.id, friend.display_name)
 ```
 ---
 
@@ -244,13 +245,13 @@ for comment in post.get_comments():
 
 # Users who reacted to the post → Reactor
 for reactor in post.get_reactors():
-    print(reactor.reaction_type, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.display_name)
 ```
 ---
 
 ## MediaPost
 
-A `MediaPost`is a post that wraps one media (photo, video, etc.), with its own comments and reactions.
+A `MediaPost`is a post that wraps one media (photo, video), with its own comments and reactions.
 
 ```python
 mp = fgs.MediaPost.from_media_post_id(ctx, media_post_id="1109890145162796")
@@ -290,7 +291,7 @@ for comment in mp.get_comments():
 
 # Users who reacted to the media post → Reactor
 for reactor in mp.get_reactors():
-    print(reactor.reaction_type, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.display_name)
 ```
 ---
 
@@ -325,7 +326,7 @@ for comment_reply in comment.get_replies():
 
 # Users who reacted to the comment → Reactor
 for reactor in comment.get_reactors():
-    print(reactor.reaction_type, reactor.profile.name)
+    print(reactor.reaction_type, reactor.profile.display_name)
 ```
 ---
 
@@ -334,7 +335,7 @@ for reactor in comment.get_reactors():
 ```python
 group = fgs.Group.from_group_id(ctx, group_id="2781022932139267")
 # Or from groupname: group = fgs.Group.from_groupname(ctx, groupname="workingmemes")
-print(group.name)
+print(group.display_name)
 ```
 
 ### Group properties
@@ -342,7 +343,7 @@ print(group.name)
 ```python
 ## Identity
 group.id                # "2781022932139267"
-group.name              # "Working Memes"
+group.display_name      # "Working Memes"
 group.url               # "https://www.facebook.com/groups/workingmemes"
 group.member_count      # "1.2M members"
 group.profile_picture_url # "https://scontent...jpg"
@@ -369,7 +370,7 @@ for mp in group.get_video_posts():
 
 # Group's members → GroupMember
 for member in group.get_members():
-    print(member.join_status, member.contribution_score, member.profile.name)
+    print(member.join_status, member.contribution_score, member.profile.display_name)
 ```
 ---
 
@@ -439,7 +440,7 @@ listing.videos                  # [Video(id="...", thumbnail_image_url="https://
 seller = listing.seller
 
 seller.profile.id                      # "123451234512345"
-seller.profile.name                    # "Dawg"
+seller.profile.display_name            # "Dawg"
 seller.profile.profile_picture_url     # "https://...jpg"
 seller.joined_time                     # 1615703350
 seller.is_verified                     # False
@@ -454,7 +455,7 @@ seller.combined_ratings_count          # 24
 partner = listing.partner_seller
 
 partner.profile.id                     # "1033819751641974"
-partner.profile.name                   # "RICKS"
+partner.profile.display_name           # "RICKS"
 partner.profile.profile_picture_url    # None
 partner.partner_brand_name             # "eBay"
 partner.seller_review_count            # 12903
@@ -465,9 +466,117 @@ partner.average_ship_time              # None
 ```
 
 ---
+
+## Page
+
+A `Page` represents a Facebook Page. It allows businesses, brands, creators, public figures, and organizations to reach audiences, promote offerings, and engage with them.
+
+```python
+page = fgs.Page.from_page_id(ctx, page_id="51752540096")
+print(page.display_name)
+```
+
+### Page properties
+
+```python
+## Identity
+page.id                    # "51752540096"
+page.display_name          # "Rockstar Games"
+page.url                   # "https://..."
+page.profile_picture_url   # "https://...jpg"
+```
+
+### Page methods
+
+```python
+# Get the associated Facebook personal profile → Profile
+profile = page.get_profile()
+print(profile.id, profile.display_name)
+```
+
+---
+
+## Advertisement
+
+An `Advertisement` represents an advertisement from the Facebook Ad Library.
+
+```python
+ad = fgs.Advertisement.from_ad_id(ctx, ad_id="1145379027885091")
+print(ad.snapshot)
+```
+
+### Advertisement properties
+
+```python
+## Identity
+ad.id                       # "123456789876789"
+ad.is_active                # True
+ad.categories               # ["POLITICAL"]
+ad.start_date               # 1760000000
+ad.end_date                 # None
+
+## Content
+ad.text                     # "Discover our latest products!"
+ad.publisher_platforms      # ["FACEBOOK", "INSTAGRAM"]
+ad.snapshot                 # AdSnapshot(...)
+
+## Reach / spending ( POLITICAL_AND_ISSUE_ADS ONLY)
+ad.fev_info                 # AdFevInfo(...)
+ad.impressions              # "10K - 15K"
+ad.reach_estimate           # "10K - 15K"
+ad.currency                 # "USD"
+ad.spend                    # "$1,000 - $1,500"
+
+## Related information
+ad.page                     # Page(...)
+
+## snaphot contains the actual creative content of the advertisement, including text, images, videos, and links.
+ad.snapshot                 # AdSnapshot(
+                            #     primary_text="Discover our latest products!",
+                            #     headline="Shop Now",
+                            #     page_categories=("Shopping & Retail",),
+                            #     page_like_count=10000,
+                            #     link_url="https://example.com",
+                            #     display_format="IMAGE",
+                            #     cta_type="SHOP_NOW",
+                            #     cta_text="Shop Now",
+                            #     images=(AdImage(image_url="https://...jpg"),),
+                            #     videos=(AdVideo(video_url="https://...mp4", preview_image_url="https://...jpg"),),
+                            #     cards=(
+                            #         AdCard(
+                            #             title="Product",
+                            #             body="Product description",
+                            #             link_description="Learn more about this product",
+                            #             link_url="https://example.com",
+                            #             cta_type="SHOP_NOW",
+                            #             cta_text="Shop Now",
+                            #             image=AdImage(image_url="https://...jpg"),
+                            #             video=AdVideo(
+                            #                 video_url="https://...mp4",
+                            #                 preview_image_url="https://...jpg",
+                            #             ),
+                            #         ),
+                            #     ),
+                            #     extra_links=("https://example.com",),
+                            #     extra_texts=({...},),
+                            #     extra_images=(AdImage(...),),
+                            #     extra_videos=(AdVideo(...),),
+                            # )
+```
+
+### Advertisement methods
+
+```python
+# Get advertisements using the same or similar creatives → Advertisement
+for related_ad in ad.get_collation():
+    print(related_ad.id, related_ad.text)
+```
+
+---
+
 ## SearchEngine
 
-Facebook search service — profiles, posts, groups, and Marketplace listings.
+Facebook search service for profiles, posts, groups, Marketplace listings, and Ad Library advertisements.
 
 ```python
 engine = fgs.SearchEngine(ctx)
@@ -478,9 +587,9 @@ engine = fgs.SearchEngine(ctx)
 Search Facebook for profiles, posts, or groups.
 
 ```python
-it = engine.search("Ishowspeed", filter_type="profile", exact_match=True)
+it = engine.general.search("Ishowspeed", filter_type="profile", exact_match=True)
 for item in it:
-    print(item.id, item.name)
+    print(item.id, item.display_name)
 
 # filter_type: "all" | "profile" | "post" | "group"
 #   "all"      → yields Profile, Post, MediaPost, Group
@@ -494,7 +603,7 @@ for item in it:
 Search Facebook Marketplace listings.
 
 ```python
-it = engine.search_marketplace(
+it = engine.marketplace.search(
     query="iphone",
     is_stock_available=True,
     filter_location_latitude=40.7128,
@@ -509,6 +618,32 @@ it = engine.search_marketplace(
 
 for listing in it:                     # yields MarketplaceListing
     print(listing.id, listing.title, listing.price)
+```
+
+### Search advertisements
+
+Search the Facebook Ad Library for advertisements.
+
+```python
+it = engine.ad_library.search(
+    query="GTA6",
+    filter_page_id="0",              # Specific Page ID or "0" for all Pages
+    filter_active_status="ALL",      # ALL | ACTIVE | INACTIVE
+    filter_country="ALL",            # Country ISO code or "ALL"
+    from_date="2026-01-01",          # YYYY-MM-DD
+    to_date="2026-11-26",            # YYYY-MM-DD
+)
+
+for ad in it:                        # yields Advertisement
+    print(ad.id, ad.snapshot, ad.is_active)
+
+## Get the number of active ads a Page runs in a country
+total = engine.ad_library.count(
+    filter_page_id="51752540096",   # the Page's ID
+    filter_active_status="ACTIVE",
+    filter_country="US",
+)
+print(total)
 ```
 
 ---
@@ -529,7 +664,7 @@ For example, `get_followers()` returns full `Profile` objects:
 
 ```python
 for follower in user.get_followers():
-    # Properties: follower.name, follower.gender, follower.is_verified, etc.
+    # Properties: follower.display_name, follower.gender, follower.is_verified, etc.
     # Methods: follower.get_posts(), follower.get_photo_posts(), etc.
 
 ```

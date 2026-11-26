@@ -776,6 +776,23 @@ class ProfileCometAppCollectionReelsRendererPaginationQueryGraphQL(FacebookGraph
         variables["cursor"] = cursor
         return super().send(variables)
 
+class ProfileCometDirectoryAuthenticityModalQueryGraphQL(FacebookGraphQL):
+    """Page Details"""
+
+    OPERATION_NAME = (
+        "ProfileCometDirectoryAuthenticityModalQuery"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=ProfileCometDirectoryHeaderTopRow.react"
+
+    VARIABLES = {
+        "scale": 1,
+        "userID": None,
+    }
+
+    def send(self, userId: str):
+        variables = dict(self.VARIABLES)
+        variables["userID"] = userId
+        return super().send(variables)
 
 class ProfileCometTimelineFeedRefetchQueryGraphQL(FacebookGraphQL):
     """Profile timeline — the user's own posts, paginated."""
@@ -1331,3 +1348,188 @@ class GroupsCometMediaVideosTabGridQueryGraphQL(FacebookGraphQL):
         variables["cursor"] = cursor
         return super().send(variables)
 
+class AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(FacebookGraphQL):
+    """Page Info"""
+
+    OPERATION_NAME = (
+        "AdLibraryMobileFocusedStateProviderRefetchQuery"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=AdLibraryFoundationRoot.react"
+
+    VARIABLES = {
+        "activeStatus": "ALL", # ALL, ACTIVE , INACTIVE
+        "adType": "ALL",
+        "audienceTimeframe": "LAST_7_DAYS",
+        "bylines": [],
+        "collationToken": None,
+        "contentLanguages": [],
+        "countries": ["ALL"],
+        "country": "ALL",
+        "deeplinkAdID": None,
+        "excludedIDs": [],
+        "fetchPageInfo": True,
+        "fetchSharedDisclaimers": True,
+        "hasDeeplinkAdID": False,
+        "isAboutTab": True,
+        "isAudienceTab": False,
+        "isLandingPage": False,
+        "isTargetedCountry": False,
+        "location": None,
+        "mediaType": "ALL", # VIDEO, IMAGE, MEME, IMAGE_AND_MEME, NONE 
+        "multiCountryFilterMode": None,
+        "pageIDs": [],
+        "potentialReachInput": [],
+        "publisherPlatforms": [],
+        "queryString": "",
+        "regions": [],
+        "searchType": None,
+        "sessionID": None,
+        "sortData": None,
+        "source": None,
+        "startDate": None,
+        "v": None,
+        "viewAllPageID": "0",
+    }
+
+    def send(self, query: str = "", pageId: str= "0", filter_active_status: str = "ALL", filter_country: str = "ALL", from_date: str = None, to_date: str = None, deeplinkAdID: str = None):
+        variables = dict(self.VARIABLES)
+        ## page info
+        variables["viewAllPageID"] = pageId
+
+        ## single ad
+        if deeplinkAdID:
+            variables["hasDeeplinkAdID"] = True
+            variables["deeplinkAdID"] = deeplinkAdID
+
+        ## page's ads info
+        # ---- Resolve dates ----
+        startDate = None
+        if to_date is not None or  from_date is not None: 
+            
+            if to_date is None:
+                to_date = date.today().isoformat()
+
+            if from_date is None:
+                to_dt = date.fromisoformat(to_date)
+                try:
+                    from_date = to_dt.replace(year=to_dt.year - 7).isoformat()
+                except ValueError:  # Feb 29 -> non-leap year
+                    from_date = to_dt.replace(year=to_dt.year - 7, day=28).isoformat()
+
+            startDate = {
+                "max": to_date,
+                "min": from_date,
+            }   
+            
+        variables["queryString"] = query
+        variables["activeStatus"] = filter_active_status
+        variables["countries"] = [filter_country]
+        variables["country"] = filter_country
+        variables["startDate"] = startDate
+
+        return super().send(variables)
+
+
+class AdLibrarySearchPaginationQueryGraphQL(FacebookGraphQL):
+    """Advertisement Pagniated Search"""
+
+    OPERATION_NAME = (
+        "AdLibrarySearchPaginationQuery"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=AdLibraryFoundationRoot.react"
+
+    VARIABLES = {
+        "activeStatus": "ACTIVE",
+        "adType": "ALL",
+        "bylines": [],
+        "collationToken": None,
+        "contentLanguages": [],
+        "countries": ["ALL"],
+        "cursor": None,
+        "excludedIDs": [],
+        "first": 30,
+        "isTargetedCountry": False,
+        "location": None,
+        "mediaType": "ALL",
+        "multiCountryFilterMode": None,
+        "pageIDs": [],
+        "potentialReachInput": [],
+        "publisherPlatforms": [],
+        "queryString": None,
+        "regions": [],
+        "searchType": "KEYWORD_UNORDERED",
+        "sessionID": None,
+        "sortData": {
+            "direction": "DESCENDING",
+            "mode": "SORT_BY_TOTAL_IMPRESSIONS",
+        },
+        "source": "NAV_HEADER",
+        "startDate": None,
+        "v": None,
+        "viewAllPageID": "0",
+    }
+
+    def send(self, query: str = "", cursor: str = None, filter_page_id: str = "0", filter_active_status: str = "ALL", filter_country: str = "ALL", from_date: str = None, to_date: str = None ):
+
+        # ---- Resolve dates ----
+        startDate = None
+        if to_date is not None or  from_date is not None: 
+            
+            if to_date is None:
+                to_date = date.today().isoformat()
+
+            if from_date is None:
+                to_dt = date.fromisoformat(to_date)
+                try:
+                    from_date = to_dt.replace(year=to_dt.year - 7).isoformat()
+                except ValueError:  # Feb 29 -> non-leap year
+                    from_date = to_dt.replace(year=to_dt.year - 7, day=28).isoformat()
+
+            startDate = {
+                "max": to_date,
+                "min": from_date,
+            }   
+
+        variables = dict(self.VARIABLES)
+        variables["activeStatus"] = filter_active_status
+        variables["queryString"] = query
+        variables["cursor"] = cursor
+        variables["countries"] = [filter_country]
+        variables["startDate"] = startDate
+        if filter_page_id:
+            variables["searchType"] = "PAGE"
+            variables["viewAllPageID"] = filter_page_id
+        else:
+            variables["searchType"] = "KEYWORD_UNORDERED"
+
+        return super().send(variables)
+
+class AdLibraryV3AdCollationDetailsQueryGraphQL(FacebookGraphQL):
+    """Ads Collation Details"""
+
+    OPERATION_NAME = (
+        "AdLibraryV3AdCollationDetailsQuery"
+    )
+    REFERENCE_PAGE_URL = "https://www.facebook.com/ajax/bootloader-endpoint/?modules=AdLibraryFoundationRoot.react"
+
+    VARIABLES = {
+        "collationGroupID": None,
+        "forwardCursor": None,
+        "backwardCursor": None,
+        "activeStatus": "ALL",
+        "adType": "ALL",
+        "bylines": [],
+        "countries": ["ALL"],
+        "location": None,
+        "potentialReach": [],
+        "publisherPlatforms": [],
+        "regions": [],
+        "sessionID": None,
+        "startDate": None,
+    }
+
+    def send(self, collationGroupID: str, cursor: str = None):
+        variables = dict(self.VARIABLES)
+        variables["collationGroupID"] = collationGroupID
+        variables["forwardCursor"] = cursor
+        return super().send(variables)
