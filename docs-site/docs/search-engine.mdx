@@ -10,19 +10,27 @@ import { Props, Prop } from '@site/src/components/Props';
 
 # SearchEngine
 
-Search Facebook for profiles, posts, groups, and Marketplace listings.
+Search Facebook for profiles, posts, groups, Marketplace listings, and Ad Library advertisements.
 
 SearchEngine can be created with:
 
 <code className="signature">SearchEngine(context: <Link to="/facebook-context">FacebookContext</Link>) -> <Link to="/search-engine">SearchEngine</Link></code>
 
-## Methods
+SearchEngine has three search services:
 
-### search
+<Props>
+  <Prop name="general" type={<a href="#general-search">GeneralSearch</a>}>Profiles, posts, and groups.</Prop>
+  <Prop name="marketplace" type={<a href="#marketplace-search">MarketplaceSearch</a>}>Marketplace listings.</Prop>
+  <Prop name="ad_library" type={<a href="#ad-library-search">AdLibrarySearch</a>}>Meta Ad Library advertisements.</Prop>
+</Props>
+
+## General search
+
+### general.search
 
 <Props>
   <Prop
-    name="search(text, filter_type='all', exact_match=False)"
+    name="general.search(text, filter_type='all', exact_match=False)"
     type={
       <>
         <Link to="/models/profile">Profile</Link>
@@ -45,11 +53,13 @@ SearchEngine can be created with:
   <Prop name="exact_match" type="bool"><code>True</code> requires an exact match. Defaults to <code>False</code> (fuzzy matching).</Prop>
 </Props>
 
-### search_marketplace
+## Marketplace search
+
+### marketplace.search
 
 <Props>
   <Prop
-    name="search_marketplace(query, *, ...)"
+    name="marketplace.search(query, *, ...)"
     type={<Link to="/models/marketplace-listing">MarketplaceListing</Link>}
     iterator
   >
@@ -69,6 +79,41 @@ SearchEngine can be created with:
   <Prop name="sort_by" type="str | None">Sort order: <code>"CREATION_TIME_DESCEND"</code>, <code>"PRICE_DESCEND"</code>, <code>"PRICE_ASCEND"</code>, or <code>"DISTANCE_ASCEND"</code>.</Prop>
 </Props>
 
+## Ad Library search
+
+Search the Meta Ad Library. Both methods below accept the same filters.
+
+### ad_library.search
+
+<Props>
+  <Prop
+    name="ad_library.search(query, *, ...)"
+    type={<Link to="/models/advertisement">Advertisement</Link>}
+    iterator
+  >
+    Search Ad Library advertisements.
+  </Prop>
+</Props>
+
+### ad_library.count
+
+<Props>
+  <Prop name="ad_library.count(query='', *, ...)" type="int | None">
+    Number of advertisements matching the filters, without fetching the ads themselves. Sends a request to Facebook. The value is reported by Facebook and may be approximate. Returns <code>None</code> if no count is available.
+  </Prop>
+</Props>
+
+### Filters
+
+<Props>
+  <Prop name="query" type="str">Search text. For <code>count</code>, an empty string matches all ads allowed by the other filters.</Prop>
+  <Prop name="filter_page_id" type="str">Restrict to a Facebook Page ID. Defaults to <code>"0"</code> (all Pages).</Prop>
+  <Prop name="filter_active_status" type="str"><code>"ALL"</code>, <code>"ACTIVE"</code>, or <code>"INACTIVE"</code>. Defaults to <code>"ALL"</code>.</Prop>
+  <Prop name="filter_country" type="str">Country ISO code, e.g. <code>"US"</code>. Defaults to <code>"ALL"</code> (all countries).</Prop>
+  <Prop name="from_date" type="str | None">Start of the date range, <code>YYYY-MM-DD</code>.</Prop>
+  <Prop name="to_date" type="str | None">End of the date range, <code>YYYY-MM-DD</code>.</Prop>
+</Props>
+
 ## Example
 
 ```python
@@ -78,9 +123,19 @@ context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
 engine = fgs.SearchEngine(context)
 
-for profile in engine.search("Ishowspeed", filter_type="profile", exact_match=True):
-    print(profile.id, profile.name)
+# General
+for profile in engine.general.search("Ishowspeed", filter_type="profile", exact_match=True):
+    print(profile.id, profile.display_name)
 
-for listing in engine.search_marketplace("iphone", filter_price_upper_bound=500):
+# Marketplace
+for listing in engine.marketplace.search("iphone", filter_price_upper_bound=500):
     print(listing.id, listing.title, listing.price)
+
+# Ad Library
+total = engine.ad_library.count("Nike", filter_country="US", filter_active_status="ACTIVE")
+print(total)
+
+for ad in engine.ad_library.search("Nike", filter_country="US", filter_active_status="ACTIVE"):
+    print(ad.id, ad.is_active, ad.page.display_name)
+    break
 ```

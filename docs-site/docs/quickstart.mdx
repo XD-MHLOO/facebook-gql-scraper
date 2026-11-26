@@ -32,7 +32,7 @@ import facebook_gql_scraper as fgs
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 user = fgs.Profile.from_user_id(context, user_id="100084254631043")
 
-print(user.name, user.biography, user.followers_count)
+print(user.display_name, user.biography, user.followers_count)
 ```
 
 ## Next steps

@@ -36,7 +36,8 @@ MAX_GROUP_MEMBERS = 50
 MAX_GROUP_POSTS = 10
 MAX_SEARCH_RESULTS = 10
 MAX_MARKETPLACE_RESULTS = 10
-
+PAGE_ID = "51752540096"
+AD_ID = "1145379027885091"
 
 class TestFacebook(unittest.TestCase):
 
@@ -316,7 +317,7 @@ class TestFacebook(unittest.TestCase):
         engine = fgs.SearchEngine(self.fbContext)
 
         results = []
-        for i, item in enumerate(engine.search("facebook")):
+        for i, item in enumerate(engine.general.search("facebook")):
             results.append(item)
             if i >= MAX_SEARCH_RESULTS - 1:
                 break
@@ -348,7 +349,7 @@ class TestFacebook(unittest.TestCase):
 
         results = []
         for i, listing in enumerate(
-            engine.search_marketplace("iphone", is_stock_available=True)
+            engine.marketplace.search("iphone", is_stock_available=True)
         ):
             results.append(listing)
             if i >= MAX_MARKETPLACE_RESULTS - 1:
@@ -366,7 +367,7 @@ class TestFacebook(unittest.TestCase):
         engine = fgs.SearchEngine(self.fbContext)
 
         listing_id = None
-        for listing in engine.search_marketplace("iphone", is_stock_available=True):
+        for listing in engine.marketplace.search("iphone", is_stock_available=True):
             if listing.id:
                 listing_id = listing.id
                 break
@@ -381,6 +382,81 @@ class TestFacebook(unittest.TestCase):
         self.assertIsNotNone(listing)
         self.assertEqual(listing.id, listing_id)
 
+    # ========================================================
+    # Page
+    # ========================================================
+
+    def test_page(self):
+        page = fgs.Page.from_page_id(
+            self.fbContext,
+            page_id=PAGE_ID,
+        )
+
+        self.assertIsInstance(page, fgs.Page)
+        self.assertEqual(page.id, PAGE_ID)
+        self.assertIsNotNone(page.display_name)
+
+
+    def test_page_get_profile(self):
+        page = fgs.Page.from_page_id(
+            self.fbContext,
+            page_id=PAGE_ID,
+        )
+
+        profile = page.get_profile()
+  
+
+        self.assertIsInstance(profile, fgs.Profile)
+        self.assertIsNotNone(profile.id)
+
+    # ========================================================
+    # Advertisement
+    # ========================================================
+
+    def test_advertisement(self):
+        ad = fgs.Advertisement.from_ad_id(
+            self.fbContext,
+            ad_id=AD_ID,
+        )
+
+        self.assertIsInstance(ad, fgs.Advertisement)
+        self.assertEqual(ad.id, AD_ID)
+        self.assertIsNotNone(ad.snapshot)
+
+
+    def test_advertisement_collation(self):
+        ad = fgs.Advertisement.from_ad_id(
+            self.fbContext,
+            ad_id=AD_ID,
+        )
+
+        related_ads = []
+        for i, related_ad in enumerate(ad.get_collation()):
+            related_ads.append(related_ad)
+            if i >= MAX_SEARCH_RESULTS - 1:
+                break
+
+        for related_ad in related_ads:
+            self.assertIsInstance(related_ad, fgs.Advertisement)
+            self.assertIsNotNone(related_ad.id)
+
+    def test_search_advertisements(self):
+        engine = fgs.SearchEngine(self.fbContext)
+
+        results = []
+        for i, ad in enumerate(
+            engine.ad_library.search(
+                query="Nike",
+                filter_page_id="0",
+                filter_active_status="ALL",
+                filter_country="US",
+            )
+        ):
+            results.append(ad)
+            if i >= MAX_SEARCH_RESULTS - 1:
+                break
+
+        self.assertGreater(len(results), 0)
 
 class TestSerpParsing(unittest.TestCase):
     """Offline parser tests for search results (no cookies / network required)."""

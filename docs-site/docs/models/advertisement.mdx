@@ -1,0 +1,144 @@
+---
+id: advertisement
+title: Advertisement
+sidebar_label: Advertisement
+slug: /models/advertisement
+---
+
+import { Props, Prop } from '@site/src/components/Props';
+import Link from '@docusaurus/Link';
+
+# Advertisement
+
+An advertisement from the Meta Ad Library.
+
+Advertisement can be created with:
+
+<code className="signature">Advertisement.from_ad_id(context: <Link to="/facebook-context">FacebookContext</Link>, ad_id: str) -> <Link to="/models/advertisement">Advertisement</Link></code>  
+
+## Properties
+
+**Identity & status**
+
+<Props>
+  <Prop name="id" type="str">Advertisement ID.</Prop>
+  <Prop name="is_active" type="bool | None">Whether the ad is currently running.</Prop>
+  <Prop name="categories" type="list[str] | None">Categories assigned to the ad.</Prop>
+  <Prop name="start_date" type="int | None">Unix timestamp when the ad started running.</Prop>
+  <Prop name="end_date" type="int | None">Unix timestamp when the ad stopped running. May be <code>None</code> for active ads.</Prop>
+  <Prop name="publisher_platforms" type="list[str] | None">Platforms the ad runs on, e.g. <code>"FACEBOOK"</code>, <code>"INSTAGRAM"</code>.</Prop>
+</Props>
+
+**Content**
+
+<Props>
+  <Prop name="text" type="str | None">Body text of the ad.</Prop>
+  <Prop name="snapshot" type={<><a href="#adsnapshot">AdSnapshot</a> | None</>}>Creative snapshot.</Prop>
+  <Prop name="page" type="Page | None" href="/models/page">Page that published the ad.</Prop>
+  <Prop name="fev_info" type={<><a href="#adfevinfo">AdFevInfo</a> | None</>}>Advertiser verification info.</Prop>
+</Props>
+
+**Delivery & spend**
+
+<Props>
+  <Prop name="impressions" type="str | None">Estimated impression range, as a display string.</Prop>
+  <Prop name="reach_estimate" type="str | None">Estimated audience reach.</Prop>
+  <Prop name="currency" type="str | None">Currency code used for spend.</Prop>
+  <Prop name="spend" type="str | None">Estimated spend range, as a display string.</Prop>
+</Props>
+
+## Methods
+
+<Props>
+  <Prop name="get_collation()" type="Advertisement" href="/models/advertisement" iterator>
+    Other ads in the same collation group: ads that reuse the same creative (image or video and text) but run with different start dates, locations or budgets.
+  </Prop>
+</Props>
+
+## Related types
+
+These types are only returned through `Advertisement` properties.
+
+### AdSnapshot
+
+The ad creative, returned by `ad.snapshot`.
+
+<Props>
+  <Prop name="primary_text" type="str | None">Main ad text.</Prop>
+  <Prop name="headline" type="str | None">Ad headline.</Prop>
+  <Prop name="display_format" type="str | None">Creative format, e.g. <code>"IMAGE"</code>, <code>"VIDEO"</code>, <code>"CAROUSEL"</code>.</Prop>
+  <Prop name="link_url" type="str | None">Destination URL.</Prop>
+  <Prop name="cta_type" type="str | None">Call-to-action type.</Prop>
+  <Prop name="cta_text" type="str | None">Call-to-action label.</Prop>
+  <Prop name="page_categories" type="tuple[str, ...] | None">Categories of the advertiser's Page.</Prop>
+  <Prop name="page_like_count" type="int | None">Likes on the advertiser's Page.</Prop>
+  <Prop name="images" type={<>tuple[<a href="#adimage">AdImage</a>, ...] | None</>}>Images in the creative.</Prop>
+  <Prop name="videos" type={<>tuple[<a href="#advideo">AdVideo</a>, ...] | None</>}>Videos in the creative.</Prop>
+  <Prop name="cards" type={<>tuple[<a href="#adcard">AdCard</a>, ...] | None</>}>Carousel cards.</Prop>
+  <Prop name="extra_links" type="tuple[str, ...] | None">Additional links.</Prop>
+  <Prop name="extra_texts" type="tuple[dict, ...] | None">Additional text blocks.</Prop>
+  <Prop name="extra_images" type={<>tuple[<a href="#adimage">AdImage</a>, ...] | None</>}>Additional images.</Prop>
+  <Prop name="extra_videos" type={<>tuple[<a href="#advideo">AdVideo</a>, ...] | None</>}>Additional videos.</Prop>
+</Props>
+
+### AdCard
+
+One card of a carousel ad.
+
+<Props>
+  <Prop name="title" type="str | None">Card title.</Prop>
+  <Prop name="body" type="str | None">Card body text.</Prop>
+  <Prop name="link_description" type="str | None">Link description.</Prop>
+  <Prop name="link_url" type="str | None">Card destination URL.</Prop>
+  <Prop name="cta_type" type="str | None">Call-to-action type.</Prop>
+  <Prop name="cta_text" type="str | None">Call-to-action label.</Prop>
+  <Prop name="image" type={<><a href="#adimage">AdImage</a> | None</>}>Card image.</Prop>
+  <Prop name="video" type={<><a href="#advideo">AdVideo</a> | None</>}>Card video.</Prop>
+</Props>
+
+### AdImage
+
+<Props>
+  <Prop name="image_url" type="str | None">Image URL.</Prop>
+</Props>
+
+### AdVideo
+
+<Props>
+  <Prop name="video_url" type="str | None">Video URL.</Prop>
+  <Prop name="preview_image_url" type="str | None">Preview image URL.</Prop>
+</Props>
+
+### AdFevInfo
+
+Advertiser verification and contact details. - Politic and Issue Ads Only
+
+<Props>
+  <Prop name="authorized_entity_text" type="str | None">Entity authorized to run the ad.</Prop>
+  <Prop name="submitted_on" type="str | None">Date the verification was submitted.</Prop>
+  <Prop name="phone" type="str | None">Contact phone number.</Prop>
+  <Prop name="email" type="str | None">Contact email.</Prop>
+  <Prop name="website" type="str | None">Contact website.</Prop>
+  <Prop name="address" type="str | None">Contact address.</Prop>
+</Props>
+
+## Example
+
+```python
+import facebook_gql_scraper as fgs
+
+context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
+
+ad = fgs.Advertisement.from_ad_id(context, ad_id="1145379027885091")
+print(ad.id, ad.is_active, ad.page.display_name)
+
+snap = ad.snapshot
+if snap:
+    print(snap.page_categories, snap.display_format)
+    for card in snap.cards or ():
+        print(card.title)
+
+# Ads that share the same creative
+for similar_ad in ad.get_collation():
+    print(similar_ad.id, similar_ad.page.display_name)
+```
