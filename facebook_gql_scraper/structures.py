@@ -1214,6 +1214,7 @@ class Profile(FacebookModel):
         # Resolve page id (Ad Library advertiser)
         if not user_id and self._data.get("page_id"):
             resolved_profile = Profile.from_page_id(self._context, self._data["page_id"])
+            self._data.update(resolved_profile._data)
             self._full_fetched = resolved_profile._full_fetched
             return
     
@@ -1488,16 +1489,17 @@ class Profile(FacebookModel):
                     if tab else {"id": None, "collections": {}}
                 )
 
-        
-        delegate_page_graphql = ProfileCometDirectoryAuthenticityModalQueryGraphQL(self._context)
-        response_delegate_page = delegate_page_graphql.send(userId=self.id)
-        parsed_delegate_page = self._context.parse_graphql_response(
-            response_delegate_page.text
-        )
-
         page_id = None
-        if parsed_delegate_page is not None and parsed_delegate_page.parsed_data is not None:
-            page_id = parsed_delegate_page.parsed_data.page_id
+
+        if self._context.login:
+            delegate_page_graphql = ProfileCometDirectoryAuthenticityModalQueryGraphQL(self._context)
+            response_delegate_page = delegate_page_graphql.send(userId=self.id)
+            parsed_delegate_page = self._context.parse_graphql_response(
+                response_delegate_page.text
+            )
+
+            if parsed_delegate_page is not None and parsed_delegate_page.parsed_data is not None:
+                page_id = parsed_delegate_page.parsed_data.page_id
 
 
         user_data = {
@@ -1993,6 +1995,7 @@ class Profile(FacebookModel):
         )
 
         profile._obtain_metadata()
+        profile._data["page_id"] = page_ref.id
         return profile
 
     def get_followers(self) -> PaginatedIterator["Profile"]:

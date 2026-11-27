@@ -472,7 +472,7 @@ partner.average_ship_time              # None
 An `Advertisement` represents an advertisement from the Facebook Ad Library.
 
 ```python
-ad = fgs.Advertisement.from_ad_id(ctx, ad_id="1145379027885091")
+ad = fgs.Advertisement.from_ad_id(ctx, ad_id="1712965127104183")
 print(ad.snapshot)
 ```
 

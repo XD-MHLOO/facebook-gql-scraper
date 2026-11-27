@@ -136,6 +136,6 @@ total = engine.ad_library.count("Nike", filter_country="US", filter_active_statu
 print(total)
 
 for ad in engine.ad_library.search("Nike", filter_country="US", filter_active_status="ACTIVE"):
-    print(ad.id, ad.is_active, ad.page.display_name)
+    print(ad.id, ad.is_active, ad.advertiser.display_name)
     break
 ```

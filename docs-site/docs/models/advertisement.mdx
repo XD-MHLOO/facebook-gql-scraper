@@ -134,7 +134,7 @@ import facebook_gql_scraper as fgs
 context = fgs.FacebookContext(cookies_file="facebook_cookies.json")
 
 ad = fgs.Advertisement.from_ad_id(context, ad_id="1145379027885091")
-print(ad.id, ad.is_active, ad.page.display_name)
+print(ad.id, ad.is_active, ad.advertiser.display_name)
 
 snap = ad.snapshot
 if snap:
@@ -144,5 +144,5 @@ if snap:
 
 # Ads that share the same creative
 for similar_ad in ad.get_collation():
-    print(similar_ad.id, similar_ad.page.display_name)
+    print(similar_ad.id, similar_ad.advertiser.display_name)
 ```
