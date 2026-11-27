@@ -467,35 +467,6 @@ partner.average_ship_time              # None
 
 ---
 
-## Page
-
-A `Page` represents a Facebook Page. It allows businesses, brands, creators, public figures, and organizations to reach audiences, promote offerings, and engage with them.
-
-```python
-page = fgs.Page.from_page_id(ctx, page_id="51752540096")
-print(page.display_name)
-```
-
-### Page properties
-
-```python
-## Identity
-page.id                    # "51752540096"
-page.display_name          # "Rockstar Games"
-page.url                   # "https://..."
-page.profile_picture_url   # "https://...jpg"
-```
-
-### Page methods
-
-```python
-# Get the associated Facebook personal profile → Profile
-profile = page.get_profile()
-print(profile.id, profile.display_name)
-```
-
----
-
 ## Advertisement
 
 An `Advertisement` represents an advertisement from the Facebook Ad Library.
@@ -518,17 +489,6 @@ ad.end_date                 # None
 ## Content
 ad.text                     # "Discover our latest products!"
 ad.publisher_platforms      # ["FACEBOOK", "INSTAGRAM"]
-ad.snapshot                 # AdSnapshot(...)
-
-## Reach / spending ( POLITICAL_AND_ISSUE_ADS ONLY)
-ad.fev_info                 # AdFevInfo(...)
-ad.impressions              # "10K - 15K"
-ad.reach_estimate           # "10K - 15K"
-ad.currency                 # "USD"
-ad.spend                    # "$1,000 - $1,500"
-
-## Related information
-ad.page                     # Page(...)
 
 ## snaphot contains the actual creative content of the advertisement, including text, images, videos, and links.
 ad.snapshot                 # AdSnapshot(
@@ -562,6 +522,17 @@ ad.snapshot                 # AdSnapshot(
                             #     extra_images=(AdImage(...),),
                             #     extra_videos=(AdVideo(...),),
                             # )
+
+## Reach / spending ( POLITICAL_AND_ISSUE_ADS ONLY)
+ad.fev_info                 # AdFevInfo(...)
+ad.impressions              # "10K - 15K"
+ad.reach_estimate           # "10K - 15K"
+ad.currency                 # "USD"
+ad.spend                    # "$1,000 - $1,500"
+
+## Related information
+ad.advertiser                     # Profile(...)
+
 ```
 
 ### Advertisement methods

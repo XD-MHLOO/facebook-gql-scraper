@@ -46,8 +46,7 @@ from .exceptions import (
     MarketplaceListingNotFoundError,
     AdvertisementNotFoundError,
     InvalidIdTypeError,
-    ProfileNotAvailableException,
-    PageNotFoundError,
+    NotFacebookProfileException,
 )
 
 from .get_collection_token import get_collection_token
@@ -1187,8 +1186,8 @@ class Profile(FacebookModel):
     def __init__(self, context, data):
         super().__init__(context, data)
 
-        assert "id" in self._data or "username" in self._data, (
-            "Profile requires id or username"
+        assert any(k in self._data for k in ("id", "username", "page_id")), (
+            "Profile requires id, username or page_id"
         )
         self._full_fetched = False
 
@@ -1211,7 +1210,13 @@ class Profile(FacebookModel):
             self._data.update(resolved_profile._data)
             self._full_fetched = resolved_profile._full_fetched
             return
-        
+
+        # Resolve page id (Ad Library advertiser)
+        if not user_id and self._data.get("page_id"):
+            resolved_profile = Profile.from_page_id(self._context, self._data["page_id"])
+            self._full_fetched = resolved_profile._full_fetched
+            return
+    
         user_collection_ids_graphql = ProfileCometHeaderQueryGraphQL(self._context)
         response_user_collection_ids = user_collection_ids_graphql.send(userId=user_id)
         parsed_user_collection_ids = self._context.parse_graphql_response(
@@ -1899,6 +1904,11 @@ class Profile(FacebookModel):
 
         return self._field("business_hours")
 
+    @staticmethod
+    def _is_facebook_url(url: Optional[str]) -> bool:
+        hostname = (urlparse(url or "").hostname or "").lower()
+        return bool(re.compile(r"(?:[\w-]+\.)*(?:facebook\.com|fb\.com)").fullmatch(hostname))
+
     @classmethod
     def from_user_id(
         cls,
@@ -1951,6 +1961,39 @@ class Profile(FacebookModel):
             return cls.from_user_id(context, user_id)
 
         raise ProfileNotFoundError(f"No profile found for username: {username}")
+
+    @classmethod
+    def from_page_id(cls, context, page_id: str) -> "Profile":
+
+        graphql = AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(context)
+        resp = graphql.send(pageId=page_id)
+        parsed = context.parse_graphql_response(resp.text)
+
+        if parsed is None or parsed.parsed_data is None or parsed.parsed_data.page is None:
+            raise ProfileNotFoundError(f"No page found for page ID: {page_id}")
+
+        page_ref: ParserPageRef = parsed.parsed_data.page
+    
+        # 2. Reject non-Facebook before any expensive fetch
+        if not cls._is_facebook_url(page_ref.url):
+            raise NotFacebookProfileException(
+                f"Page {page_id} found but it is not associated with a Facebook profile."
+            )
+
+        profile_ref = ParserProfileRef(
+            url=page_ref.url,
+            display_name=page_ref.display_name,
+            profile_picture_url=page_ref.profile_picture_url,
+            page_id=page_ref.id,
+        )
+
+        profile = cls(
+            context,
+            profile_ref.model_dump(exclude_none=True),
+        )
+
+        profile._obtain_metadata()
+        return profile
 
     def get_followers(self) -> PaginatedIterator["Profile"]:
         """
@@ -3502,134 +3545,6 @@ class MarketplaceListing(FacebookModel):
         listing = cls(context, {"id": listing_id})
         listing._obtain_metadata()
         return listing
-
-class Page(FacebookModel):
-    """
-    Facebook Page.
-
-    A Page may initially be created with only partial data. Additional
-    metadata (display name, URL, profile picture, etc.) is fetched lazily
-    when required.
-
-    :param context: Facebook context used for GraphQL requests.
-    :type context: FacebookContext
-    :param data: Initial Page data.
-    :type data: dict
-    """
-    def __init__(self, context: FacebookContext, data: dict):
-        super().__init__(context, data)
-        assert "id" in self._data, "Facebook Page requires id"
-        self._full_fetched = False
-
-    def _obtain_metadata(self):
-        
-        if self._full_fetched:
-            return
-        
-        ad_lib_mobile_graphql = AdLibraryMobileFocusedStateProviderRefetchQueryGraphQL(self._context)
-        response_ad_lib_mobile_graphql = ad_lib_mobile_graphql.send(pageId=self.id)
-        parsed = self._context.parse_graphql_response(response_ad_lib_mobile_graphql.text)
-
-        if parsed is None or parsed.parsed_data is None or parsed.parsed_data.page is None:
-                raise PageNotFoundError(f"Page not found: {self.id}")
-
-        page: ParserPageRef = parsed.parsed_data.page
-
-
-        self._data.update(page.model_dump(exclude_none=True))
-        self._full_fetched = True
-
-    @property
-    def _identity(self):
-        return self._field("id")
-
-    @property
-    def id(self) -> str:
-        """
-        Unique identifier of the Facebook Page ID.
-
-        :return: Facebook Page ID.
-        :rtype: str
-        """
-        return self._field("id")
-    
-    @property
-    def display_name(self) -> Optional[str]:
-        """
-        Display name of the page profile.
-
-        :return: Page profile name.
-        :rtype: str or None
-        """
-        return self._field("display_name")
-
-    @property
-    def url(self) -> Optional[str]:
-        """
-        URL of the page profile.
-
-        :return: Page profile URL.
-        :rtype: str or None
-        """
-        return self._field("url")
-
-    @property
-    def profile_picture_url(self) -> Optional[str]:
-        """
-        URL of the Page profile picture.
-
-        :return: Page profile picture URL.
-        :rtype: str or None
-        """
-        return self._field("profile_picture_url")
-    
-    def get_profile(self) -> Optional[Profile]:
-        """
-        Get the personal profile associated with this Page.
-
-        :return: Associated personal profile, if available.
-        :rtype: Profile or None
-        """
-
-        url = self.url
-
-        hostname = (urlparse(url).hostname or "").lower()
-        if not re.fullmatch(r"(?:[\w-]+\.)*(?:facebook\.com|fb\.com)", hostname):
-            raise ProfileNotAvailableException(
-                "This Page is not associated with a personal Facebook profile. "
-                "It may belong to another platform."
-            )
-
-        profile_ref = ParserProfileRef(
-            url=self.url,
-            display_name=self.display_name,
-            profile_picture_url=self.profile_picture_url,
-            page_id=self.id,
-        )
-        return Profile(
-            self._context,
-            profile_ref.model_dump(exclude_none=True),
-        )
-
-    @classmethod
-    def from_page_id(
-        cls,
-        context: FacebookContext,
-        page_id: str,
-    ) -> "Page":
-        """
-        Create a Page object from its Facebook Page ID.
-
-        :param context: Facebook context.
-        :type context: FacebookContext
-        :param page_id: Facebook Page ID.
-        :type page_id: str
-        :return: Retrieved Facebook Page.
-        :rtype: Page
-        """
-        page = cls(context, {"id": page_id})
-        page._obtain_metadata()
-        return page
     
 class Advertisement(FacebookModel):
     """
@@ -3849,17 +3764,28 @@ class Advertisement(FacebookModel):
         )
 
     @property
-    def page(self) -> Optional["Page"]:
+    def advertiser(self) -> Optional["Profile"]:
         """
-        Facebook Page associated with the advertisement.
+        Advertiser the ad runs under.
 
-        :return: Associated Facebook Page.
-        :rtype: Page or None
+        :return: Associated Platform Profile.
+        :rtype: Profile or None
         """
         data = self._field("page", None)
 
         if data is not None:
-            return Page(self._context, data)
+            page_ref: ParserPageRef  = ParserPageRef(**data)
+        
+            profile_ref = ParserProfileRef(
+                url=page_ref.url,
+                display_name=page_ref.display_name,
+                profile_picture_url=page_ref.profile_picture_url,
+                page_id=page_ref.id,
+            )
+            return Profile(
+                self._context,
+                profile_ref.model_dump(exclude_none=True),
+            )
 
         return None
     

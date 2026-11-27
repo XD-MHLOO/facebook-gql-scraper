@@ -34,9 +34,13 @@ Advertisement can be created with:
 <Props>
   <Prop name="text" type="str | None">Body text of the ad.</Prop>
   <Prop name="snapshot" type={<><a href="#adsnapshot">AdSnapshot</a> | None</>}>Creative snapshot.</Prop>
-  <Prop name="page" type="Page | None" href="/models/page">Page that published the ad.</Prop>
+  <Prop name="advertiser" type="Profile | None" href="/models/profile">Profile of the advertiser that published the ad.</Prop>
   <Prop name="fev_info" type={<><a href="#adfevinfo">AdFevInfo</a> | None</>}>Advertiser verification info.</Prop>
 </Props>
+
+:::note
+The advertiser may not be a Facebook profile (e.g. an Instagram profile). It still returns a `Profile` (props like `display_name`, `url` and `profile_picture_url`) remain accessible. Accessing any other property raises [`NotFacebookProfileException`](/exceptions#not-a-facebook-profile), since only Facebook profiles can be resolved.
+:::
 
 **Delivery & spend**
 

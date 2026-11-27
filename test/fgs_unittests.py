@@ -14,6 +14,7 @@ import facebook_gql_scraper as fgs
 # ============================================================
 
 PROFILE_ID = "100044296486382"
+PROFILE_USERNAME = "Cristiano"
 # FRIENDS_PROFILE_ID = "123"
 
 POST_ID = "2397851114308533"
@@ -48,10 +49,20 @@ class TestFacebook(unittest.TestCase):
     # Profile
     # ========================================================
 
-    def test_profile(self):
+    def test_profile_from_user_id(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
         self.assertIsNotNone(user)
         self.assertEqual(user.id, PROFILE_ID)
+
+    def test_profile_from_username(self):
+        user = fgs.Profile.from_username(self.fbContext, username=PROFILE_USERNAME)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.username, PROFILE_USERNAME)
+
+    def test_profile_from_page_id(self):
+        user = fgs.Profile.from_page_id(self.fbContext, page_id=PAGE_ID)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.page_id, PAGE_ID)
 
     def test_profile_posts(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
@@ -365,33 +376,6 @@ class TestFacebook(unittest.TestCase):
 
         self.assertIsNotNone(listing)
         self.assertEqual(listing.id, listing_id)
-
-    # ========================================================
-    # Page
-    # ========================================================
-
-    def test_page(self):
-        page = fgs.Page.from_page_id(
-            self.fbContext,
-            page_id=PAGE_ID,
-        )
-
-        self.assertIsInstance(page, fgs.Page)
-        self.assertEqual(page.id, PAGE_ID)
-        self.assertIsNotNone(page.display_name)
-
-
-    def test_page_get_profile(self):
-        page = fgs.Page.from_page_id(
-            self.fbContext,
-            page_id=PAGE_ID,
-        )
-
-        profile = page.get_profile()
-  
-
-        self.assertIsInstance(profile, fgs.Profile)
-        self.assertIsNotNone(profile.id)
 
     # ========================================================
     # Advertisement
