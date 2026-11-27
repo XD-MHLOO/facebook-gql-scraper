@@ -1128,6 +1128,8 @@ class SearchCometResultsPaginatedResultsQueryGraphQL(FacebookGraphQL):
             exp_type = "PEOPLE_TAB"
         elif filter_type == "group":
             exp_type = "GROUPS_TAB"
+        elif filter_type == "page":
+            exp_type = "PAGES_TAB"
         elif filter_type == "post":
             filters = ['{"name":"merged_public_posts","args":""}']
         variables["args"] = {

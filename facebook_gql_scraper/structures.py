@@ -3899,6 +3899,10 @@ class GeneralSearch:
     ) -> PaginatedIterator[Group]: ...
     @overload
     def search(
+        self, text: str, filter_type: Literal["page"], exact_match: bool = ...
+    ) -> PaginatedIterator[Profile]: ...
+    @overload
+    def search(
         self, text: str, filter_type: Literal["all"] = ..., exact_match: bool = ...
     ) -> PaginatedIterator[Profile | PostBase | Group]: ...
 
@@ -3909,7 +3913,9 @@ class GeneralSearch:
         :param text: Search text.
         :type text: str
         :param filter_type: Result type to search for. Supported values are
-            ``"all"``, ``"profile"``, ``"post"``, and ``"group"``.
+            ``"all"``, ``"profile"``, ``"page"``, ``"post"``, and ``"group"``.
+            ``"profile"`` returns personal profiles and ``"page"`` returns
+            Facebook Pages. Both yield :class:`Profile` objects.
         :type filter_type: str
         :param exact_match: Whether to return only exact matches.
         :type exact_match: bool

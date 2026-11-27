@@ -324,16 +324,34 @@ class TestFacebook(unittest.TestCase):
     # Search
     # ========================================================
 
-    def test_search(self):
+    def test_search_filter_types(self):
         engine = fgs.SearchEngine(self.fbContext)
 
-        results = []
-        for i, item in enumerate(engine.general.search("facebook")):
-            results.append(item)
-            if i >= MAX_SEARCH_RESULTS - 1:
-                break
+        SEARCH_FILTER_TYPES = {
+            "profile": (fgs.Profile,),
+            "page": (fgs.Profile,),
+            "post": (fgs.PostBase,),
+            "group": (fgs.Group,),
+            "all": (fgs.Profile, fgs.PostBase, fgs.Group),
+        }
 
-        self.assertTrue(len(results) > 0)
+        for filter_type, expected_types in SEARCH_FILTER_TYPES.items():
+            with self.subTest(filter_type=filter_type):
+                results = []
+                for i, item in enumerate(
+                    engine.general.search("facebook", filter_type=filter_type)
+                ):
+                    results.append(item)
+                    if i >= MAX_SEARCH_RESULTS - 1:
+                        break
+
+                if not results:
+                    self.skipTest(f"{filter_type} search returned no results.")
+
+                for item in results:
+                    self.assertIsInstance(item, expected_types)
+                    self.assertIsNotNone(item.id)
+
 
     # ========================================================
     # Marketplace

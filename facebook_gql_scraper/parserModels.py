@@ -111,7 +111,6 @@ class ParserProfileRef(_Base):
 
         return self
 
-
 # ---------- group ----------
 
 class ParserGroup(_Base):
@@ -254,6 +253,14 @@ ParserCollectionItem = Annotated[
     Field(discriminator="type"),
 ]
 
+# ---------- page ----------
+
+class ParserPageRef(_Base):
+    type: Literal["page"] = "page"
+    id: Optional[str] = None
+    display_name: Optional[str] = None
+    url: Optional[str] = None
+    profile_picture_url: Optional[str] = None
 
 # ---------- serp search ----------
 
@@ -367,14 +374,6 @@ class ParserMarketplaceMedia(_Base):
     photos: List[ParserPhotoMedia] = Field(default_factory=list)
     videos: List[ParserVideoMedia] = Field(default_factory=list)
 
-# ---------- page ----------
-
-class ParserPageRef(_Base):
-    type: Literal["page"] = "page"
-    id: Optional[str] = None
-    display_name: Optional[str] = None
-    url: Optional[str] = None
-    profile_picture_url: Optional[str] = None
 
 # ---------- advertisement ----------
 

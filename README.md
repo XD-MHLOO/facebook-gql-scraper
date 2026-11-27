@@ -555,16 +555,17 @@ engine = fgs.SearchEngine(ctx)
 
 ### Search
 
-Search Facebook for profiles, posts, or groups.
+Search Facebook for profiles, pages, posts, or groups.
 
 ```python
 it = engine.general.search("Ishowspeed", filter_type="profile", exact_match=True)
 for item in it:
     print(item.id, item.display_name)
 
-# filter_type: "all" | "profile" | "post" | "group"
+# filter_type: "all" | "profile" | "page" | "post" | "group"
 #   "all"      → yields Profile, Post, MediaPost, Group
 #   "profile"  → yields Profile
+#   "page"     → yields Profile
 #   "post"     → yields Post, MediaPost
 #   "group"    → yields Group
 ```

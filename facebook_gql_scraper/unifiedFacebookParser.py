@@ -1108,7 +1108,8 @@ def parse_group_members(data) -> ParserGroupMembersPage:
 def parse_facebook_serp_search(response) -> ParserSearchResults:
     """
     Parse a Facebook SERP (search engine results page) response.
-    Handles user results (role == "ENTITY_USER") and post results (role == "TOP_PUBLIC_POSTS").
+    Handles user results , page results,
+    group results, and post results.
     """
     serp = response.get("data", {}).get("serpResponse") or response.get("serpResponse")
     if not serp:
@@ -1128,7 +1129,7 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
         rendering = edge.get("rendering_strategy", {})
 
         # --- User result ---
-        if role == "ENTITY_USER":
+        if role in ("ENTITY_USER", "ENTITY_PAGES"):
             profile = vm.get("profile")
             logging_model = vm.get("logging_model")
             if not profile or profile.get("__typename") != "User":
