@@ -337,7 +337,7 @@ def _parse_feed_post(edge) -> list[ParserFeedPost]:
             url=(node.get("comet_sections", {}).get("content", {}).get("story", {}) or {}).get("wwwURL"),
             author=ParserProfileRef(
                 id=(node.get("actors") or [{}])[0].get("id"),
-                name=(node.get("actors") or [{}])[0].get("name"),
+                display_name=(node.get("actors") or [{}])[0].get("name"),
                 url=(node.get("actors") or [{}])[0].get("url"),
             ),
             title=title_text,
@@ -404,7 +404,7 @@ def _extract_group_from_view_model(vm) -> Optional[ParserGroup]:
 
     return ParserGroup(
         id=profile.get("id"),
-        name=profile.get("name"),
+        display_name=profile.get("name"),
         url=profile.get("url") or profile.get("profile_url"),
         profile_picture_url=profile.get("profile_picture", {}).get("uri"),
     )
@@ -469,7 +469,7 @@ def parse_profile_collection_ids(data: dict) -> ParserProfileRef:
 
     return ParserProfileRef(
         id=user.get("id", None),
-        name=user.get("name", None),
+        display_name=user.get("name", None),
         alternate_name=user.get("alternate_name", None),
         gender=user.get("gender", None),
         url=user.get("url", None),
@@ -559,7 +559,12 @@ def parse_about_collections(data: dict) -> ParserAboutCollection:
 
     return ParserAboutCollection(**about_data)
 
-def parse_post(data) -> ParserPost:
+def parse_delegate_page(data: dict) -> ParserProfileRef:
+    return ParserProfileRef(
+        page_id=data.get("data", {}).get("user", {}).get("delegate_page_id")
+    )
+
+def parse_post(data: dict) -> ParserPost:
     """Parse a single-post dialog payload (`data.node_v2`) into a ParserPost."""
 
     # Navigate node_v2 directly via dictionary access
@@ -623,7 +628,7 @@ def parse_post(data) -> ParserPost:
         url=comet_story.get("wwwURL", None),
         author=ParserProfileRef(
             id=comet_story.get("actors", [{}])[0].get("id", None),
-            name=comet_story.get("actors", [{}])[0].get("name", None),
+            display_name=comet_story.get("actors", [{}])[0].get("name", None),
             url=comet_story.get("actors", [{}])[0].get("url", None),
             profile_picture_url=(
                 comet_story.get("actors", [{}])[0]
@@ -671,7 +676,7 @@ def parse_reactors(data) -> ParserReactorsPage:
                 reaction_type=edge.get("feedback_reaction_info", {}).get("reaction_type"),
                 author=ParserProfileRef(
                     id=user_node.get("id"),
-                    name=user_node.get("name"),
+                    display_name=user_node.get("name"),
                     url=user_node.get("profile_url"),
                     profile_picture_url=(user_node.get("profile_picture") or {}).get("uri"),
                 ),
@@ -731,7 +736,7 @@ def parse_facebook_comments(data) -> ParserCommentsPage:
                 reply_expansion_token=(node.get("feedback", {}).get("expansion_info") or {}).get("expansion_token"),
                 author=ParserProfileRef(
                     id=author.get("id"),
-                    name=author.get("name"),
+                    display_name=author.get("name"),
                     gender=author.get("gender"),
                     url=author.get("url"),
                     profile_picture_url=(author.get("profile_picture_depth_0") or {}).get("uri"),
@@ -797,7 +802,7 @@ def parse_comment_replies(data, comment_type="reply") -> ParserRepliesPage:
             ),
             author=ParserProfileRef(
                 id=reply_node.get("author", {}).get("id"),
-                name=reply_node.get("author", {}).get("name"),
+                display_name=reply_node.get("author", {}).get("name"),
                 gender=reply_node.get("author", {}).get("gender"),
                 url=reply_node.get("author", {}).get("url"),
                 profile_picture_url=(
@@ -809,7 +814,7 @@ def parse_comment_replies(data, comment_type="reply") -> ParserRepliesPage:
             parent_comment=ParserComment(
                 id=parent_comment_id,
                 author=ParserProfileRef(
-                    name=comment_direct_parent.get("author", {}).get("name"),
+                    display_name=comment_direct_parent.get("author", {}).get("name"),
                     gender=comment_direct_parent.get("author", {}).get("gender"),
                 ),
                 feedback_id=node.get("id"),
@@ -853,7 +858,7 @@ def parse_facebook_group_hovercard(data) -> ParserGroup:
     sample_members = [
         ParserProfileRef(
             id=edge.get("node", {}).get("id"),
-            name=edge.get("node", {}).get("name"),
+            display_name=edge.get("node", {}).get("name"),
             url=edge.get("node", {}).get("url"),
             profile_picture_url=(
                 edge.get("node", {}).get("profile_picture", {}).get("uri")
@@ -865,7 +870,7 @@ def parse_facebook_group_hovercard(data) -> ParserGroup:
 
     return ParserGroup(
         id=group.get("id") or node.get("id"),
-        name=group.get("name"),
+        display_name=group.get("display_name"),
         url=group.get("profile_url") or group.get("url"),
         member_count=group.get("group_member_profiles", {}).get("formatted_count_text"),
         profile_picture_url=group.get("profile_picture", {}).get("uri"),
@@ -956,7 +961,7 @@ def parse_timeline_app_collection_page_items(data) -> ParserCollectionPage:
             items.append(
                 ParserProfileRef(
                     id=inner_node.get("id"),
-                    name=item_node.get("title", {}).get("text"),
+                    display_name=item_node.get("title", {}).get("text"),
                     url=item_node.get("url"),
                     profile_picture_url=item_node.get("image_v2", {}).get("uri"),
                     is_verified=inner_node.get("is_verified", False),
@@ -1032,7 +1037,7 @@ def parse_timeline_app_collection_aggregated_fb_shorts(data) -> ParserCollection
                 text=(inner_node.get("message") or {}).get("text"),
                 author=ParserProfileRef(
                     id=owner.get("id"),
-                    name=owner.get("name"),
+                    display_name=owner.get("name"),
                     url=owner.get("url"),
                     is_verified=owner.get("is_verified"),
                     profile_picture_url=(owner.get("displayPicture") or {}).get("uri"),
@@ -1083,7 +1088,7 @@ def parse_group_members(data) -> ParserGroupMembersPage:
                 contribution_score=contribution_score,
                 account=ParserProfileRef(
                     id=node.get("id"),
-                    name=node.get("name"),
+                    display_name=node.get("name"),
                     url=node.get("url"),
                     profile_picture_url=(node.get("profile_picture") or {}).get("uri"),
                 ),
@@ -1103,7 +1108,8 @@ def parse_group_members(data) -> ParserGroupMembersPage:
 def parse_facebook_serp_search(response) -> ParserSearchResults:
     """
     Parse a Facebook SERP (search engine results page) response.
-    Handles user results (role == "ENTITY_USER") and post results (role == "TOP_PUBLIC_POSTS").
+    Handles user results , page results,
+    group results, and post results.
     """
     serp = response.get("data", {}).get("serpResponse") or response.get("serpResponse")
     if not serp:
@@ -1123,7 +1129,7 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
         rendering = edge.get("rendering_strategy", {})
 
         # --- User result ---
-        if role == "ENTITY_USER":
+        if role in ("ENTITY_USER", "ENTITY_PAGES"):
             profile = vm.get("profile")
             logging_model = vm.get("logging_model")
             if not profile or profile.get("__typename") != "User":
@@ -1132,7 +1138,7 @@ def parse_facebook_serp_search(response) -> ParserSearchResults:
             profiles.append(
                 ParserProfileRef(
                     id=logging_model.get("tapped_result_id"),
-                    name=profile.get("name"),
+                    display_name=profile.get("name"),
                     url=profile.get("url"),
                     profile_picture_url=(profile.get("profile_picture") or {}).get("uri"),
                     is_verified=profile.get("is_verified"),
@@ -1230,7 +1236,7 @@ def _parse_marketplace_listing(canonical_listing) -> Optional[ParserMarketplaceL
         seller=ParserSeller(
             profile=ParserProfileRef(
                 id=seller.get("id"),
-                name=seller.get("name"),
+                display_name=seller.get("name"),
             )
         ),
     )
@@ -1343,7 +1349,7 @@ def _parse_marketplace_pdp_listing(target) -> Optional[ParserMarketplaceListing]
         seller=ParserSeller(
             profile=ParserProfileRef(
                 id=seller.get("id"),
-                name=seller.get("name"),
+                display_name=seller.get("name"),
                 profile_picture_url=(seller.get("profile_picture") or {}).get("uri"),
             ),
             joined_time=seller.get("join_time"),
@@ -1412,7 +1418,7 @@ def _parse_marketplace_partner_pdp_listing(target) -> Optional[ParserMarketplace
         partner=ParserPartnerSeller(
             profile=ParserProfileRef(
                 id=partner_seller.get("id"),
-                name=partner_seller.get("partner_seller_name"),
+                display_name=partner_seller.get("partner_seller_name"),
                 profile_picture_url=partner_seller.get("seller_photo_url"),
             ),
             partner_brand_name=target.get("partner_brand_name"),
@@ -1551,7 +1557,7 @@ def parse_media_post_photo(data) -> Optional[ParserMediaPost]:
         text=text,
         author=ParserProfileRef(
             id=owner.get("id"),
-            name=(currMedia.get("owner") or {}).get("name"),
+            display_name=(currMedia.get("owner") or {}).get("name"),
             profile_picture_url=((currMedia.get("owner") or {}).get("profile_picture") or {}).get("uri"),
         ),
         reactors_visible=(reaction_display_strategy == "NONE") if reaction_display_strategy else None,
@@ -1646,7 +1652,7 @@ def parse_media_post_video(data) -> Optional[ParserMediaPost]:
         text=(data_currMedia_creation_story.get("message") or {}).get("text"),
         author=ParserProfileRef(
             id=a.get("id"),
-            name=a.get("name"),
+            display_name=a.get("name"),
             url=a.get("url"),
             is_verified=a.get("is_verified"),
         ),
@@ -1717,6 +1723,190 @@ def parse_group_mediaset(data) -> Optional[ParserMediaPostsPage]:
         ),
     )
 
+
+def _parse_ad_cards(raw_cards: list) -> List[ParserAdCard]:
+    cards = []
+    for card in raw_cards:
+        if not card: continue
+        cards.append(
+            ParserAdCard(
+                title=card.get("title"),
+                body=card.get("body"),
+                link_description=card.get("link_description"),
+                link_url=card.get("link_url"),
+                cta_type=card.get("cta_type"),
+                cta_text=card.get("cta_text"),
+                image=ParserAdImage(image_url=card.get("original_image_url")),
+                video=ParserAdVideo(
+                    video_url=card.get("video_hd_url") if card.get("video_hd_url") else card.get("video_sd_url"),
+                    preview_image_url=card.get("video_preview_image_url"),
+                )
+            )
+        )
+    return cards
+
+def _parse_ad(ad) -> ParserAd:
+            
+    snapshot_raw = ad.get("snapshot", {})
+    fev_info_raw = ad.get("fev_info", {})
+    body_raw = snapshot_raw.get("body", {}) or {}
+
+    videos = []
+    for v in snapshot_raw.get("videos", []):
+        videos.append(
+            ParserAdVideo(
+            video_url=v.get("video_hd_url") if v.get("video_hd_url") else v.get("video_sd_url"),
+            preview_image_url=v.get("video_preview_image_url"),
+            )
+        )
+
+    extra_videos = []
+    for v in snapshot_raw.get("extra_videos", []):
+        extra_videos.append(
+            ParserAdVideo(
+            video_url=v.get("video_hd_handle") if v.get("video_hd_handle") else v.get("video_sd_handle"),
+            )
+        )
+
+    # Build the clean snapshot
+    snapshot = ParserAdSnapshot(
+        primary_text=body_raw.get("text"),
+        headline=snapshot_raw.get("title"),
+        page_categories=tuple(snapshot_raw.get("page_categories", [])),
+        page_like_count=snapshot_raw.get("page_like_count"),
+        link_url=snapshot_raw.get("link_url"),
+        display_format=snapshot_raw.get("display_format"),
+        cta_type=snapshot_raw.get("cta_type"),
+        cta_text=snapshot_raw.get("cta_text"),
+        images=tuple(
+            ParserAdImage(image_url=img.get("original_image_url")) for img in snapshot_raw.get("images", [])
+        ),
+        videos=tuple(videos),
+        cards=tuple(_parse_ad_cards(snapshot_raw.get("cards", []))),
+        extra_links=tuple(snapshot_raw.get("extra_links", [])),
+        extra_texts=tuple(snapshot_raw.get("extra_texts", [])),
+        extra_images=tuple(
+            ParserAdImage(image_url=img.get("original_image_url")) for img in snapshot_raw.get("extra_images", [])
+        ),
+        extra_videos=tuple(extra_videos),
+    )
+
+    fev_info = None
+    if fev_info_raw:
+        fev_info = ParserFevInfo(
+            authorized_entity_text=fev_info_raw.get("authorized_entity_text"),
+            submitted_on=fev_info_raw.get("submitted_on"),
+            phone=fev_info_raw.get("phone"),
+            email=fev_info_raw.get("email"),
+            website=fev_info_raw.get("website"),
+            address=fev_info_raw.get("address"),
+        )
+    
+    # Build the clean ad object
+    ad = ParserAd(
+        id=ad.get("ad_archive_id"),
+        is_active=ad.get("is_active"),
+        collation_count=ad.get("collation_count"),
+        collation_id=ad.get("collation_id"),
+        categories=ad.get("categories"),
+        start_date=ad.get("start_date"),
+        end_date=ad.get("end_date"),
+        publisher_platforms=ad.get("publisher_platform", []),
+        page=ParserPageRef(
+            id=ad.get("page_id"),
+            display_name=ad.get("page_name") or snapshot_raw.get("page_name"),
+            profile_picture_url=snapshot_raw.get("page_profile_picture_url"),
+            url=snapshot_raw.get("page_profile_uri"),
+        ),
+        snapshot=snapshot,
+        fev_info=fev_info,
+        impressions=ad.get("impressions_with_index").get("impressions_text"),
+        reach_estimate=ad.get("reach_estimate"),
+        currency=ad.get("currency"),
+        spend=ad.get("spend"),
+    )
+    
+    return ad
+
+
+def parse_page_info_and_single_ad(data: dict) -> ParserPageRefAdOthers:
+    ad_library_main = data.get("ad_library_main") or {}
+    search_results = ad_library_main.get("search_results_connection") or {}
+    ad_count = search_results.get("count")
+
+    # Single Ad
+    deeplink_ad_archive_result = ad_library_main.get("deeplink_ad_archive_result")
+    if deeplink_ad_archive_result:
+        raw_ad = deeplink_ad_archive_result.get("deeplink_ad_archive")
+        return ParserPageRefAdOthers(
+            ad=_parse_ad(raw_ad) if raw_ad else None,
+            ad_count=ad_count,
+        )
+
+    # Page
+    page_info = (data.get("ad_library_page_info") or {}).get("page_info")
+    page = None
+    if page_info and not page_info.get("page_is_deleted"):
+        page = ParserPageRef(
+            id=page_info.get("page_id"),
+            display_name=page_info.get("page_name"),
+            url=page_info.get("page_profile_uri"),
+        )
+
+    return ParserPageRefAdOthers(page=page, ad_count=ad_count)
+
+
+
+def parse_ad_collation(data: dict) -> ParserAdsPage:
+
+    ad_library_main = data.get("data", {}).get("ad_library_main", {})
+    collation_results = ad_library_main.get("collation_results", {})
+
+    results = []
+
+    for ad_card in collation_results.get("ad_cards", []):
+       results.append(_parse_ad(ad_card))
+
+    return ParserAdsPage(
+        ads=results,
+        page_info=ParserPageInfo(
+            type_cursor="ad_collation",
+            end_cursor=collation_results.get("forward_cursor"),
+            has_next_page=not collation_results.get("is_complete"),
+        )
+    )
+
+def parse_ad_library_search(data: dict) -> ParserAdsPage:
+    """Parse an Ad Library search response into a clean AdLibrarySearchPage."""
+    
+    # Navigate to the search results connection
+    ad_library_main = data.get("data", {}).get("ad_library_main", {})
+    search_conn = ad_library_main.get("search_results_connection", {})
+    edges = search_conn.get("edges", [])
+    raw_page_info = search_conn.get("page_info", {})
+    
+    results = []
+
+    
+    for edge in edges:
+        node = edge.get("node", {})
+
+        # An edge can contain multiple collated results (variations of the same ad)
+        for collated_ad_card in node.get("collated_results", []):
+            if not collated_ad_card:
+                continue
+            
+            results.append(_parse_ad(collated_ad_card))
+
+    return ParserAdsPage(
+        ads=results,
+        page_info=ParserPageInfo(
+            type_cursor="ad_library_search",
+            end_cursor=raw_page_info.get("end_cursor"),
+            has_next_page=raw_page_info.get("has_next_page", False),
+        )
+    )
+
 def parse_facebook_payload(json_input) -> Optional[ParsedResponse]:
     """Dispatch a Facebook GraphQL response to its matching parser by schema fingerprint."""
 
@@ -1729,19 +1919,26 @@ def parse_facebook_payload(json_input) -> Optional[ParsedResponse]:
     node_block = data_block.get("node", {})
 
     # User Collection Ids
-    if "profile_header_renderer" in data_block.get("user", {}):
+    if "profile_header_renderer" in (data_block.get("user", {}) or {}):
         return ParsedResponse(
             operation="ProfileCometHeaderQuery",
             parsed_data=parse_profile_collection_ids(data),
         )
 
     # User About Subtabs Info
-    if "about_app_sections" in data_block.get("user", {}):
+    if "about_app_sections" in (data_block.get("user", {}) or {}):
         return ParsedResponse(
             operation="ProfileCometAboutAppSectionQuery",
             parsed_data=parse_about_collections(data),
         )
 
+    # User Delegate Page
+    if "delegate_page_id" in (data_block.get("user", {}) or {}):
+        return ParsedResponse(
+            operation="ProfileCometDirectoryAuthenticityModalQuery",
+            parsed_data=parse_delegate_page(data),
+        )
+            
     # Get User Posts (Paginable)
     if (
         node_block.get("__typename") == "User"
@@ -1900,6 +2097,27 @@ def parse_facebook_payload(json_input) -> Optional[ParsedResponse]:
             parsed_data=parse_group_mediaset(data),
         )
 
+    # Page Info / Single Ad
+    if ("ad_library_page_info" in data) or ("ad_library_main" in data_block and "deeplink_ad_archive_result" in data_block.get("ad_library_main")):
+        return ParsedResponse(
+            operation="AdLibraryMobileFocusedStateProviderRefetchQuery",
+            parsed_data=parse_page_info_and_single_ad(data),
+        )
+
+    # Ad Library Search
+    if "ad_library_main" in data_block and "search_results_connection" in data_block.get("ad_library_main"):
+        return ParsedResponse(
+            operation="AdLibrarySearchQuery",
+            parsed_data=parse_ad_library_search(data),
+        )
+
+    # Ad Collation
+    if "ad_library_main" in data_block and "collation_results" in data_block.get("ad_library_main"):
+        return ParsedResponse(
+            operation="AdLibraryV3AdCollationDetailsQuery",
+            parsed_data=parse_ad_collation(data),
+        )
+    
     # Unrecognized Schema
     return None
 

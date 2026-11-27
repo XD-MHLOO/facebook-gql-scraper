@@ -12,7 +12,7 @@ import Link from '@docusaurus/Link';
 
 # Profile
 
-A Facebook user profile.
+Represents a Facebook personal profile or a Facebook Page.
 
 Profile can be created with:
 
@@ -39,7 +39,9 @@ The username is resolved to an ID using regex matching. Prefer `from_user_id` wh
 
 <Props>
   <Prop name="id" type="str">Facebook user ID.</Prop>
-  <Prop name="name" type="str | None">Display name.</Prop>
+  <Prop name="page_id" type="str | None">Facebook Page ID linked to this profile.</Prop>
+  <Prop name="username" type="str | None">Facebook username.</Prop>
+  <Prop name="display_name" type="str | None">Display name.</Prop>
   <Prop name="alternate_name" type="str | None">Alternate name or nickname.</Prop>
   <Prop name="gender" type="str | None">Reported gender, e.g. <code>"MALE"</code>.</Prop>
   <Prop name="url" type="str | None">Facebook profile URL.</Prop>

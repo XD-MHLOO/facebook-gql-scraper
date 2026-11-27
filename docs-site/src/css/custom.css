@@ -38,6 +38,8 @@
 .menu__link[href$="/models/reactor"]::before { content: "thumb_up"; }
 .menu__link[href$="/models/seller"]::before { content: "sell"; }
 .menu__link[href$="/models/partner-seller"]::before { content: "store"; }
+.menu__link[href$="/models/advertisement"]::before { content: "campaign"; }
+
 
 :root {
   --ifm-background-color: #fafafa;

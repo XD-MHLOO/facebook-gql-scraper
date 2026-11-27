@@ -25,6 +25,7 @@ from .structures import (
     Comment as Comment,
     Group as Group,
     MarketplaceListing as MarketplaceListing,
+    Advertisement as Advertisement,
     SearchEngine as SearchEngine,
 )
 

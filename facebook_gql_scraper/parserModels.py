@@ -1,6 +1,8 @@
+import re
 from typing import Optional, Literal, Union, List, Dict, Any, Annotated
-from pydantic import BaseModel, ConfigDict, Field
+from urllib.parse import urlparse, parse_qs
 
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class _Base(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
@@ -71,7 +73,8 @@ class ParserAboutCollection(_Base):
 class ParserProfileRef(_Base):
     type: Literal["profile"] = "profile"
     id: Optional[str] = None
-    name: Optional[str] = None
+    username: Optional[str] = None
+    display_name: Optional[str] = None
     url: Optional[str] = None
     profile_picture_url: Optional[str] = None
     is_verified: Optional[bool] = None
@@ -83,14 +86,37 @@ class ParserProfileRef(_Base):
     friends_count: Optional[str] = None
     tabs: Optional[ParserProfileTabs] = None
     about: Optional[Dict[str, ParserAboutSection]] = None
+    page_id: Optional[str] = None
 
+    @model_validator(mode="after")
+    def _extract_from_url(self):
+        if not self.url:
+            return self
+
+        parsed = urlparse(self.url)
+
+        hostname = (parsed.hostname or "").lower()
+        if not re.fullmatch(r"(?:[\w-]+\.)*(?:facebook\.com|fb\.com)", hostname):
+            return self  # don't derive ids from other platforms
+    
+        path = parsed.path.strip("/")
+
+        if path == "profile.php":
+            fb_id = parse_qs(parsed.query).get("id", [None])[0]
+            if fb_id and not self.id:
+                self.id = fb_id
+        elif path and "/" not in path:
+            if re.fullmatch(r"[A-Za-z0-9.]+", path) and not self.username:
+                self.username = path
+
+        return self
 
 # ---------- group ----------
 
 class ParserGroup(_Base):
     type: Literal["group"] = "group"
     id: Optional[str] = None
-    name: Optional[str] = None
+    display_name: Optional[str] = None
     url: Optional[str] = None
     profile_picture_url: Optional[str] = None
     member_count: Optional[Union[int, str]] = None
@@ -227,6 +253,14 @@ ParserCollectionItem = Annotated[
     Field(discriminator="type"),
 ]
 
+# ---------- page ----------
+
+class ParserPageRef(_Base):
+    type: Literal["page"] = "page"
+    id: Optional[str] = None
+    display_name: Optional[str] = None
+    url: Optional[str] = None
+    profile_picture_url: Optional[str] = None
 
 # ---------- serp search ----------
 
@@ -328,12 +362,6 @@ class ParserMarketplaceListing(_Base):
     product_details_page_uri: Optional[str] = None
 
 
-class ParserMarketplaceSearchPage(_Base):
-    type: Literal["marketplace_search_page"] = "marketplace_search_page"
-    listings: List[ParserMarketplaceListing] = Field(default_factory=list)
-    page_info: ParserPageInfo = Field(default_factory=ParserPageInfo)
-
-
 class ParserMarketplacePDP(_Base):
     type: Literal["marketplace_pdp"] = "marketplace_pdp"
     listing: ParserMarketplaceListing
@@ -346,6 +374,86 @@ class ParserMarketplaceMedia(_Base):
     photos: List[ParserPhotoMedia] = Field(default_factory=list)
     videos: List[ParserVideoMedia] = Field(default_factory=list)
 
+
+# ---------- advertisement ----------
+
+class ParserAdImage(_Base):
+    image_url: Optional[str] = None
+
+class ParserAdVideo(_Base):
+    video_url: Optional[str] = None
+    preview_image_url: Optional[str] = None
+
+class ParserAdCard(_Base):
+    """Used for Carousel or DCO (Dynamic Creative) ads"""
+    title: Optional[str] = None
+    body: Optional[str] = None
+    link_description: Optional[str] = None
+    link_url: Optional[str] = None
+    cta_type: Optional[str] = None
+    cta_text: Optional[str] = None
+    image: Optional[ParserAdImage] = None
+    video: Optional[ParserAdVideo] = None
+
+class ParserAdSnapshot(_Base):
+    """The actual ad creative content"""
+    primary_text: Optional[str] = None
+    headline: Optional[str] = None
+    page_categories: Optional[tuple[str, ...]] = None
+    page_like_count: Optional[int] = None
+    link_url: Optional[str] = None
+    display_format: Optional[str] = None  # e.g., IMAGE, VIDEO, CAROUSEL, DCO
+    cta_type: Optional[str] = None        # e.g., SHOP_NOW, LEARN_MORE
+    cta_text: Optional[str] = None
+    images: Optional[tuple[ParserAdImage, ...]] = None
+    videos: Optional[tuple[ParserAdVideo, ...]] = None
+    cards: Optional[tuple[ParserAdCard, ...]] = None
+    extra_links: Optional[tuple[str, ...]] = None
+    extra_texts: Optional[tuple[dict, ...]] = None
+    extra_images: Optional[tuple[ParserAdImage, ...]] = None
+    extra_videos: Optional[tuple[ParserAdVideo, ...]] = None
+    
+
+# Funder Entity Verification
+class ParserFevInfo(_Base):
+    authorized_entity_text: Optional[str] = None
+    submitted_on: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    website: Optional[str] = None
+    address: Optional[str] = None
+
+class ParserAd(_Base):
+    """Top-level ad metadata and advertiser info"""
+    type: Literal["ad"] = "ad"
+    id: Optional[str] = None
+    is_active: Optional[bool] = None
+    collation_count: Optional[int] = None
+    collation_id: Optional[str] = None
+    categories: Optional[List[str]] = None
+    start_date: Optional[int] = None
+    end_date: Optional[int] = None
+    text: Optional[str] = None
+    publisher_platforms: Optional[List[str]] = None
+    page : Optional[ParserPageRef] = None
+
+    # Creative
+    snapshot: Optional[ParserAdSnapshot] = None
+
+    ## Issues, elections or politics only ##
+    fev_info: Optional[ParserFevInfo] = None
+    impressions: Optional[str] = None
+    reach_estimate: Optional[str] = None
+    currency: Optional[str] = None
+    spend: Optional[str] = None
+
+
+class ParserPageRefAdOthers(_Base):
+    type: Literal["page_info_wtih_ad"] = "page_info_wtih_ad"
+    page: Optional[ParserPageRef] = None
+    ad: Optional[ParserAd] = None
+
+    ad_count: Optional[int] = None
 
 # ---------- pages ----------
 
@@ -390,6 +498,16 @@ class ParserGroupMembersPage(_Base):
 class ParserMediaPostsPage(_Base):
     type: Literal["media_posts_page"] = "media_posts_page"
     media_posts: List[ParserMediaPost] = Field(default_factory=list)
+    page_info: ParserPageInfo = Field(default_factory=ParserPageInfo)
+
+class ParserMarketplaceSearchPage(_Base):
+    type: Literal["marketplace_search_page"] = "marketplace_search_page"
+    listings: List[ParserMarketplaceListing] = Field(default_factory=list)
+    page_info: ParserPageInfo = Field(default_factory=ParserPageInfo)
+
+class ParserAdsPage(_Base):
+    type: Literal["ad_library_search_page"] = "ad_library_search_page"
+    ads: List[ParserAd] = Field(default_factory=list)
     page_info: ParserPageInfo = Field(default_factory=ParserPageInfo)
 
 class ParsedResponse(_Base):

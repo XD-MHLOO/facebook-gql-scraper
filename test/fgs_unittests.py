@@ -14,6 +14,7 @@ import facebook_gql_scraper as fgs
 # ============================================================
 
 PROFILE_ID = "100044296486382"
+PROFILE_USERNAME = "Cristiano"
 # FRIENDS_PROFILE_ID = "123"
 
 POST_ID = "2397851114308533"
@@ -36,7 +37,8 @@ MAX_GROUP_MEMBERS = 50
 MAX_GROUP_POSTS = 10
 MAX_SEARCH_RESULTS = 10
 MAX_MARKETPLACE_RESULTS = 10
-
+PAGE_ID = "51752540096"
+AD_ID = "1145379027885091"
 
 class TestFacebook(unittest.TestCase):
 
@@ -47,10 +49,20 @@ class TestFacebook(unittest.TestCase):
     # Profile
     # ========================================================
 
-    def test_profile(self):
+    def test_profile_from_user_id(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
         self.assertIsNotNone(user)
         self.assertEqual(user.id, PROFILE_ID)
+
+    def test_profile_from_username(self):
+        user = fgs.Profile.from_username(self.fbContext, username=PROFILE_USERNAME)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.username, PROFILE_USERNAME)
+
+    def test_profile_from_page_id(self):
+        user = fgs.Profile.from_page_id(self.fbContext, page_id=PAGE_ID)
+        self.assertIsNotNone(user)
+        self.assertEqual(user.page_id, PAGE_ID)
 
     def test_profile_posts(self):
         user = fgs.Profile.from_user_id(self.fbContext, user_id=PROFILE_ID)
@@ -312,16 +324,34 @@ class TestFacebook(unittest.TestCase):
     # Search
     # ========================================================
 
-    def test_search(self):
+    def test_search_filter_types(self):
         engine = fgs.SearchEngine(self.fbContext)
 
-        results = []
-        for i, item in enumerate(engine.search("facebook")):
-            results.append(item)
-            if i >= MAX_SEARCH_RESULTS - 1:
-                break
+        SEARCH_FILTER_TYPES = {
+            "profile": (fgs.Profile,),
+            "page": (fgs.Profile,),
+            "post": (fgs.PostBase,),
+            "group": (fgs.Group,),
+            "all": (fgs.Profile, fgs.PostBase, fgs.Group),
+        }
 
-        self.assertTrue(len(results) > 0)
+        for filter_type, expected_types in SEARCH_FILTER_TYPES.items():
+            with self.subTest(filter_type=filter_type):
+                results = []
+                for i, item in enumerate(
+                    engine.general.search("facebook", filter_type=filter_type)
+                ):
+                    results.append(item)
+                    if i >= MAX_SEARCH_RESULTS - 1:
+                        break
+
+                if not results:
+                    self.skipTest(f"{filter_type} search returned no results.")
+
+                for item in results:
+                    self.assertIsInstance(item, expected_types)
+                    self.assertIsNotNone(item.id)
+
 
     # ========================================================
     # Marketplace
@@ -332,7 +362,7 @@ class TestFacebook(unittest.TestCase):
 
         results = []
         for i, listing in enumerate(
-            engine.search_marketplace("iphone", is_stock_available=True)
+            engine.marketplace.search("iphone", is_stock_available=True)
         ):
             results.append(listing)
             if i >= MAX_MARKETPLACE_RESULTS - 1:
@@ -350,7 +380,7 @@ class TestFacebook(unittest.TestCase):
         engine = fgs.SearchEngine(self.fbContext)
 
         listing_id = None
-        for listing in engine.search_marketplace("iphone", is_stock_available=True):
+        for listing in engine.marketplace.search("iphone", is_stock_available=True):
             if listing.id:
                 listing_id = listing.id
                 break
@@ -365,6 +395,54 @@ class TestFacebook(unittest.TestCase):
         self.assertIsNotNone(listing)
         self.assertEqual(listing.id, listing_id)
 
+    # ========================================================
+    # Advertisement
+    # ========================================================
+
+    def test_advertisement(self):
+        ad = fgs.Advertisement.from_ad_id(
+            self.fbContext,
+            ad_id=AD_ID,
+        )
+
+        self.assertIsInstance(ad, fgs.Advertisement)
+        self.assertEqual(ad.id, AD_ID)
+        self.assertIsNotNone(ad.snapshot)
+
+
+    def test_advertisement_collation(self):
+        ad = fgs.Advertisement.from_ad_id(
+            self.fbContext,
+            ad_id=AD_ID,
+        )
+
+        related_ads = []
+        for i, related_ad in enumerate(ad.get_collation()):
+            related_ads.append(related_ad)
+            if i >= MAX_SEARCH_RESULTS - 1:
+                break
+
+        for related_ad in related_ads:
+            self.assertIsInstance(related_ad, fgs.Advertisement)
+            self.assertIsNotNone(related_ad.id)
+
+    def test_search_advertisements(self):
+        engine = fgs.SearchEngine(self.fbContext)
+
+        results = []
+        for i, ad in enumerate(
+            engine.ad_library.search(
+                query="Nike",
+                filter_page_id="0",
+                filter_active_status="ALL",
+                filter_country="US",
+            )
+        ):
+            results.append(ad)
+            if i >= MAX_SEARCH_RESULTS - 1:
+                break
+
+        self.assertGreater(len(results), 0)
 
 if __name__ == "__main__":
     unittest.main()

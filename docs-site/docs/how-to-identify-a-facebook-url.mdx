@@ -19,6 +19,7 @@ A Facebook user profile.
 | --- | --- | --- |
 | https://www.facebook.com/Ishowspeed | Ishowspeed | <Link to="/models/profile">Profile.from_username</Link> |
 | https://www.facebook.com/profile.php?id=100084254631043 | 100084254631043 | <Link to="/models/profile">Profile.from_user_id</Link> |
+| https://www.facebook.com/ads/library/? ... &view_all_page_id=103228679166389 | 103228679166389 | <Link to="/models/profile">Profile.from_page_id</Link> |
 
 ## Post
 
@@ -81,3 +82,11 @@ A Marketplace listing.
 | URL example | Identifier | Factory |
 | --- | --- | --- |
 | https://www.facebook.com/marketplace/item/1234567890123456 | 1234567890123456 | <Link to="/models/marketplace-listing">MarketplaceListing.from_listing_id</Link> |
+
+## Advertisement
+
+An advertisement from the Meta Ad Library.
+
+| URL example | Identifier | Factory |
+| --- | --- | --- |
+| https://www.facebook.com/ads/library/? ... &id=123456789876789 | 123456789876789 | <Link to="/models/advertisement">Advertisement.from_ad_id</Link> |
