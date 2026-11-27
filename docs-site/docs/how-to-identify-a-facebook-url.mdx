@@ -19,6 +19,7 @@ A Facebook user profile.
 | --- | --- | --- |
 | https://www.facebook.com/Ishowspeed | Ishowspeed | <Link to="/models/profile">Profile.from_username</Link> |
 | https://www.facebook.com/profile.php?id=100084254631043 | 100084254631043 | <Link to="/models/profile">Profile.from_user_id</Link> |
+| https://www.facebook.com/ads/library/? ... &view_all_page_id=103228679166389 | 103228679166389 | <Link to="/models/profile">Profile.from_page_id</Link> |
 
 ## Post
 
@@ -81,34 +82,6 @@ A Marketplace listing.
 | URL example | Identifier | Factory |
 | --- | --- | --- |
 | https://www.facebook.com/marketplace/item/1234567890123456 | 1234567890123456 | <Link to="/models/marketplace-listing">MarketplaceListing.from_listing_id</Link> |
-
-## Page
-
-A Facebook Page for a business, brand, or creator.
-
-| URL example | Identifier | Factory |
-| --- | --- | --- |
-| https://www.facebook.com/ads/library/? ... &view_all_page_id=103228679166389 | 103228679166389 | <Link to="/models/page">Page.from_page_id</Link> |
-
-:::tip 
-
-How to find a Page ID. (**Not every profile has a Page.** Only creators, businesses and public figures usually do.)
-
-Manual Method 1: (in a logged-out browser)
-- Open the link, replacing the placeholder with the profile's user ID or username:
-
-```
-https://www.facebook.com/<user-id-or-username>/about_profile_transparency
-```
-
-Manual Method 2: (in a logged-in browser)
-- Open the Profile on Facebook > Tap the display name > Transparency and privacy policy > Go to Ad Library.
-   The link now contains the Page ID in `view_all_page_id`.
-
-Method 3: (from [`Profile`](/models/profile) model directly)
-- Access [`profile.page_id`](/models/profile) to get the Page ID of a profile, if it has one.
-
-:::
 
 ## Advertisement
 

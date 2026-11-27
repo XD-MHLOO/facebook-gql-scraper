@@ -30,9 +30,6 @@ class MediaPostNotFoundError(FacebookNotFoundError):
 class GroupNotFoundError(FacebookNotFoundError):
     """The group was not found on Facebook."""
 
-class PageNotFoundError(FacebookNotFoundError):
-    """The requested Page was not found on Facebook."""
-
 class MarketplaceListingNotFoundError(FacebookNotFoundError):
     """The Marketplace listing was not found on Facebook."""
 
@@ -69,8 +66,8 @@ class PhotoNotAvailableException(ResourceNotAvailableException):
 class ReelsNotAvailableException(ResourceNotAvailableException):
     """The profile does not expose its reels."""
 
-class ProfileNotAvailableException(ResourceNotAvailableException):
-    """The Page does not have an associated personal Facebook profile."""
+class NotFacebookProfileException(FacebookGqlScraperException):
+    """The Profile belongs to another platform (e.g. Instagram), not a Facebook profile."""
 
 class DocIdStillInvalidError(FacebookGqlScraperException):
     """Facebook rejected the doc_id even after re-capturing."""

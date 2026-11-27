@@ -70,13 +70,17 @@ Base class for all errors raised by this library.
   <Prop name="MarketplaceListingNotFoundError" type="Exception">
     The Marketplace listing was not found. <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
   </Prop>
-  <Prop name="PageNotFoundError" type="Exception">
-    The requested Page was not found on Facebook.
-    <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
-  </Prop>
   <Prop name="AdvertisementNotFoundError" type="Exception">
     The advertisement was not found on Facebook.
     <br /> Inherits [`FacebookNotFoundError`](#not-found-errors).
+  </Prop>
+</Props>
+
+## Not a Facebook profile
+
+<Props>
+  <Prop name="NotFacebookProfileException" type="Exception">
+    The profile belongs to another platform, such as Instagram, so there is no Facebook profile to fetch. <br /> Inherits [`FacebookGqlScraperException`](#facebookgqlscraperexception).
   </Prop>
 </Props>
 
@@ -110,10 +114,6 @@ Base class for all errors raised by this library.
   </Prop>
   <Prop name="ReelsNotAvailableException" type="Exception">
     The profile does not expose its reels. <br /> Inherits [`ResourceNotAvailableException`](#access-errors).
-  </Prop>
-  <Prop name="ProfileNotAvailableException" type="Exception">
-    The Page does not have an associated personal Facebook profile.
-    <br /> Inherits [`ResourceNotAvailableException`](#access-errors).
   </Prop>
 </Props>
 

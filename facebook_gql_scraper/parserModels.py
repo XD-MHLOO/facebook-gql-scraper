@@ -94,6 +94,11 @@ class ParserProfileRef(_Base):
             return self
 
         parsed = urlparse(self.url)
+
+        hostname = (parsed.hostname or "").lower()
+        if not re.fullmatch(r"(?:[\w-]+\.)*(?:facebook\.com|fb\.com)", hostname):
+            return self  # don't derive ids from other platforms
+    
         path = parsed.path.strip("/")
 
         if path == "profile.php":
