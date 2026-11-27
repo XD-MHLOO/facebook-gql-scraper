@@ -564,8 +564,8 @@ for item in it:
 
 # filter_type: "all" | "profile" | "page" | "post" | "group"
 #   "all"      → yields Profile, Post, MediaPost, Group
-#   "profile"  → yields Profile (people)
-#   "page"     → yields Profile (Facebook Pages)
+#   "profile"  → yields Profile
+#   "page"     → yields Profile
 #   "post"     → yields Post, MediaPost
 #   "group"    → yields Group
 ```

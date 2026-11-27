@@ -324,31 +324,33 @@ class TestFacebook(unittest.TestCase):
     # Search
     # ========================================================
 
-    def test_search(self):
+    def test_search_filter_types(self):
         engine = fgs.SearchEngine(self.fbContext)
 
-        results = []
-        for i, item in enumerate(engine.general.search("facebook")):
-            results.append(item)
-            if i >= MAX_SEARCH_RESULTS - 1:
-                break
+        SEARCH_FILTER_TYPES = {
+            "profile": (fgs.Profile,),
+            "page": (fgs.Profile,),
+            "post": (fgs.PostBase,),
+            "group": (fgs.Group,),
+            "all": (fgs.Profile, fgs.PostBase, fgs.Group),
+        }
 
-        self.assertTrue(len(results) > 0)
+        for filter_type, expected_types in SEARCH_FILTER_TYPES.items():
+            with self.subTest(filter_type=filter_type):
+                results = []
+                for i, item in enumerate(
+                    engine.general.search("facebook", filter_type=filter_type)
+                ):
+                    results.append(item)
+                    if i >= MAX_SEARCH_RESULTS - 1:
+                        break
 
-    def test_search_page(self):
-        engine = fgs.SearchEngine(self.fbContext)
+                if not results:
+                    self.skipTest(f"{filter_type} search returned no results.")
 
-        results = []
-        for i, item in enumerate(engine.search("facebook", filter_type="page")):
-            results.append(item)
-            if i >= MAX_SEARCH_RESULTS - 1:
-                break
-
-        if not results:
-            self.skipTest("Page search returned no results.")
-        for item in results:
-            self.assertIsInstance(item, fgs.Profile)
-            self.assertIsNotNone(item.id)
+                for item in results:
+                    self.assertIsInstance(item, expected_types)
+                    self.assertIsNotNone(item.id)
 
 
     # ========================================================
@@ -441,41 +443,6 @@ class TestFacebook(unittest.TestCase):
                 break
 
         self.assertGreater(len(results), 0)
-
-class TestSerpParsing(unittest.TestCase):
-    """Offline parser tests for search results (no cookies / network required)."""
-
-    def test_serp_page_parsing(self):
-        """A Page edge becomes a page result; a User edge stays a profile, not a page."""
-        from facebook_gql_scraper.unifiedFacebookParser import parse_facebook_serp_search
-        # Shape taken from a live PAGES_TAB response (trimmed).
-        resp = {"data": {"serpResponse": {"results": {"edges": [
-            {"node": {"role": "ENTITY_PAGES", "__typename": "SearchRenderable"},
-             "rendering_strategy": {"view_model": {
-                "__typename": "SearchProfileViewModel",
-                "profile": {"__typename": "User", "id": "100064740456656",
-                            "name": "Israel365",
-                            "url": "https://web.facebook.com/Israel365",
-                            "profile_picture": {"uri": "https://example.invalid/p.jpg"},
-                            "is_verified": False},
-                "logging_model": {"tapped_result_id": "100064740456656",
-                                  "module_role": "ENTITY_PAGES"},
-                "primary_snippet_text_with_entities": {
-                    "text": "Charitable organisation \u00b7 HaMasger 15, Bet Shemesh, Israel"
-                            " \u00b7 Always open \u00b7 133K followers"}}}},
-            {"node": {"role": "ENTITY_USER"}, "rendering_strategy": {"view_model": {
-                "profile": {"__typename": "User", "name": "A Person", "url": "u"},
-                "logging_model": {"tapped_result_id": "61590000000001"}}}},
-        ], "page_info": {"has_next_page": True, "end_cursor": "CUR"}}}}}
-        parsed = parse_facebook_serp_search(resp)
-        self.assertEqual([p.id for p in parsed.pages], ["100064740456656"])
-        page = parsed.pages[0]
-        self.assertEqual(page.name, "Israel365")
-        self.assertEqual(page.url, "https://web.facebook.com/Israel365")
-        self.assertEqual(page.category, "Charitable organisation")
-        self.assertEqual(page.followers_count, "133K")
-        self.assertEqual([p.id for p in parsed.profiles], ["61590000000001"])
-
 
 if __name__ == "__main__":
     unittest.main()

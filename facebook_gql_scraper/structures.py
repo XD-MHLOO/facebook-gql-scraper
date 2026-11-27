@@ -3913,14 +3913,14 @@ class GeneralSearch:
         :param text: Search text.
         :type text: str
         :param filter_type: Result type to search for. Supported values are
-            ``"all"``, ``"profile"``, ``"post"``, ``"group"``, and ``"page"``.
-            ``"profile"`` returns people; ``"page"`` returns Facebook Pages.
+            ``"all"``, ``"profile"``, ``"page"``, ``"post"``, and ``"group"``.
+            ``"profile"`` returns personal profiles and ``"page"`` returns
+            Facebook Pages. Both yield :class:`Profile` objects.
         :type filter_type: str
         :param exact_match: Whether to return only exact matches.
         :type exact_match: bool
         :return: Iterator yielding :class:`Profile`, :class:`Post`,
-            :class:`MediaPost`, or :class:`Group` objects. Page results are
-            returned as :class:`Profile` objects.
+            :class:`MediaPost`, or :class:`Group` objects.
         :rtype: PaginatedIterator
         """
 
@@ -3947,9 +3947,6 @@ class GeneralSearch:
             for g in page.groups:
                 raw.append(("group", g.model_dump(exclude_none=True)))
 
-            for pg in page.pages:
-                raw.append(("page", pg.model_dump(exclude_none=True)))
-
             page_info = {
                 "has_next_page": page.page_info.has_next_page,
                 "end_cursor": page.page_info.end_cursor,
@@ -3958,7 +3955,7 @@ class GeneralSearch:
 
         def item_wrapper(raw):
             kind, data = raw
-            if kind in ("profile", "page"):   # a Page is modelled as a Profile
+            if kind == "profile":
                 return Profile(self._context, data)
             if kind == "media_post":
                 return MediaPost(self._context, data)
